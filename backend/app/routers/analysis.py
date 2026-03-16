@@ -128,6 +128,18 @@ async def analyze_fatigue(request: FatigueAnalysisRequest) -> dict:
             kd=kd,
             ke=ke,
             num_points=request.num_points,
+            selected_mean_stress_model=request.selected_mean_stress_model.value,
+            sn_fit_points=(
+                [point.model_dump() for point in request.sn_fit_points]
+                if request.sn_fit_points
+                else None
+            ),
+            notch=request.notch.model_dump() if request.notch else None,
+            loading_blocks=(
+                [block.model_dump() for block in request.loading_blocks]
+                if request.loading_blocks
+                else None
+            ),
         )
     except Exception as exc:
         raise HTTPException(

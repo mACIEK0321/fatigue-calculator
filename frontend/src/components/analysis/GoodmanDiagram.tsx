@@ -41,11 +41,11 @@ export default function GoodmanDiagram({
     return (
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Modified Goodman Diagram</CardTitle>
+          <CardTitle className="text-base">Haigh Diagram (Mean vs Alternating Stress)</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="flex h-64 items-center justify-center text-slate-500">
-            Run an analysis to see the Goodman diagram
+            Run an analysis to see the Haigh diagram
           </div>
         </CardContent>
       </Card>
@@ -87,7 +87,7 @@ export default function GoodmanDiagram({
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Modified Goodman Diagram</CardTitle>
+        <CardTitle className="text-base">Haigh Diagram (Goodman/Gerber/Soderberg)</CardTitle>
       </CardHeader>
       <CardContent>
         <ResponsiveContainer width="100%" height={350}>

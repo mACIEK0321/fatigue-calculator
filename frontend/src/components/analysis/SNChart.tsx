@@ -54,7 +54,7 @@ export default function SNChart({ data }: SNChartProps) {
               dataKey="cycles"
               type="number"
               scale="log"
-              domain={["dataMin", "dataMax"]}
+              domain={[1, 1e9]}
               tickFormatter={(v: number) => formatScientific(v)}
               stroke="#94a3b8"
               tick={{ fill: "#94a3b8", fontSize: 11 }}

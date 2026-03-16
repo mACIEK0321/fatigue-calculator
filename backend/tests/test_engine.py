@@ -15,11 +15,15 @@ import math
 import pytest
 
 from app.core.fatigue_engine import (
+    SNDataPoint,
+    LoadingBlock,
     basquin_cycles_to_failure,
     basquin_stress_amplitude,
     calculate_modified_endurance_limit,
+    calculate_notch_sensitivity,
     calculate_surface_factor,
     coffin_manson_strain_amplitude,
+    fit_basquin_from_points,
     generate_gerber_envelope,
     generate_goodman_envelope,
     generate_morrow_envelope,
@@ -28,6 +32,7 @@ from app.core.fatigue_engine import (
     gerber_correction,
     goodman_correction,
     morrow_correction,
+    palmgren_miner_damage,
     run_full_analysis,
     soderberg_correction,
 )
@@ -441,3 +446,53 @@ class TestFullAnalysis:
             num_points=75,
         )
         assert len(result["sn_curve_data"]) == 75
+
+
+class TestBasquinFit:
+    """Tests for user-point Basquin fitting."""
+
+    def test_fit_basquin_from_points(self) -> None:
+        points = [
+            SNDataPoint(cycles=1e4, stress=420.0),
+            SNDataPoint(cycles=1e5, stress=320.0),
+            SNDataPoint(cycles=1e6, stress=245.0),
+        ]
+        fit = fit_basquin_from_points(points)
+        assert fit.points_used == 3
+        assert fit.b < 0
+        assert 0.0 <= fit.r_squared <= 1.0
+
+
+class TestNotchSensitivity:
+    """Tests for notch sensitivity models."""
+
+    def test_notch_sensitivity_bounds(self) -> None:
+        result = calculate_notch_sensitivity(
+            kt=2.2,
+            notch_radius_mm=0.8,
+            notch_constant_mm=0.25,
+            model="neuber",
+        )
+        assert 0.0 <= result.q <= 1.0
+        assert 1.0 <= result.kf <= result.kt
+
+
+class TestMinerDamage:
+    """Tests for Palmgren-Miner damage accumulation."""
+
+    def test_miner_damage_positive(self) -> None:
+        blocks = [
+            LoadingBlock(max_stress=320.0, min_stress=40.0, cycles=2e5, repeats=1),
+            LoadingBlock(max_stress=270.0, min_stress=-20.0, cycles=3e5, repeats=1),
+        ]
+        result = palmgren_miner_damage(
+            blocks=blocks,
+            sigma_f_prime=1000.0,
+            b=-0.1,
+            se=280.0,
+            sut=650.0,
+            sy=450.0,
+            model="goodman",
+        )
+        assert result.total_damage > 0
+        assert len(result.block_results) == 2

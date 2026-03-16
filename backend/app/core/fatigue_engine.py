@@ -60,6 +60,60 @@ class SNDataPoint:
     stress: float
 
 
+@dataclass
+class BasquinFitResult:
+    """Power-law fit result for S-N points using S = a*N^b."""
+
+    a: float
+    b: float
+    sigma_f_prime: float
+    r_squared: float
+    points_used: int
+
+
+@dataclass
+class NotchSensitivityResult:
+    """Computed notch sensitivity and fatigue stress concentration."""
+
+    model: str
+    kt: float
+    q: float
+    kf: float
+
+
+@dataclass
+class LoadingBlock:
+    """Single block for Palmgren-Miner damage accumulation."""
+
+    max_stress: float
+    min_stress: float
+    cycles: float
+    repeats: int = 1
+
+
+@dataclass
+class MinerBlockResult:
+    """Per-loading-block damage contribution."""
+
+    block_index: int
+    stress_amplitude: float
+    mean_stress: float
+    equivalent_alternating_stress: float
+    cycles_to_failure: Optional[float]
+    applied_cycles: float
+    damage: float
+
+
+@dataclass
+class MinerDamageResult:
+    """Palmgren-Miner cumulative damage output."""
+
+    total_damage: float
+    predicted_blocks_to_failure: Optional[float]
+    is_failure: bool
+    block_results: list[MinerBlockResult]
+
+
 # ---------------------------------------------------------------------------
 # Surface factor
 # ---------------------------------------------------------------------------
@@ -420,6 +474,181 @@ def morrow_correction(
     )
 
 
+def get_mean_stress_correction(
+    model: str,
+    stress_amplitude: float,
+    mean_stress: float,
+    se: float,
+    sut: float,
+    sy: float,
+    sigma_f_prime: float,
+) -> MeanStressCorrectionResult:
+    """Dispatch the selected mean stress correction model."""
+    key = model.lower().strip()
+    if key == "goodman":
+        return goodman_correction(stress_amplitude, mean_stress, se, sut)
+    if key == "gerber":
+        return gerber_correction(stress_amplitude, mean_stress, se, sut)
+    if key == "soderberg":
+        return soderberg_correction(stress_amplitude, mean_stress, se, sy)
+    if key == "morrow":
+        return morrow_correction(stress_amplitude, mean_stress, se, sigma_f_prime)
+    raise ValueError(
+        f"Unknown mean stress model '{model}'. Valid: goodman, gerber, soderberg, morrow"
+    )
+
+
+def fit_basquin_from_points(points: list[SNDataPoint]) -> BasquinFitResult:
+    """Fit Basquin power law from user points using log-log regression.
+
+    Fits S = a*N^b and maps to S = sigma_f'*(2N)^b where
+    sigma_f' = a / (2^b).
+    """
+    if len(points) < 2:
+        raise ValueError("At least two S-N points are required for Basquin fitting")
+
+    n_values = np.array([p.cycles for p in points], dtype=float)
+    s_values = np.array([p.stress for p in points], dtype=float)
+
+    if np.any(n_values <= 0.0) or np.any(s_values <= 0.0):
+        raise ValueError("All S-N points must have positive cycles and stress")
+
+    if len(np.unique(n_values)) < 2:
+        raise ValueError("At least two unique cycle values are required")
+
+    x = np.log10(n_values)
+    y = np.log10(s_values)
+    slope_b, intercept = np.polyfit(x, y, 1)
+
+    if not np.isfinite(slope_b) or not np.isfinite(intercept):
+        raise ValueError("Basquin fitting failed due to non-finite regression coefficients")
+
+    y_pred = intercept + slope_b * x
+    ss_res = float(np.sum((y - y_pred) ** 2))
+    ss_tot = float(np.sum((y - np.mean(y)) ** 2))
+    r_squared = 1.0 if ss_tot <= 1e-14 else 1.0 - ss_res / ss_tot
+
+    a_coeff = float(10.0 ** intercept)
+    b_exponent = float(slope_b)
+    sigma_f_prime = float(a_coeff / (2.0 ** b_exponent))
+
+    if b_exponent >= 0.0:
+        raise ValueError("Fitted Basquin exponent must be negative for physical S-N behavior")
+
+    return BasquinFitResult(
+        a=a_coeff,
+        b=b_exponent,
+        sigma_f_prime=sigma_f_prime,
+        r_squared=float(np.clip(r_squared, 0.0, 1.0)),
+        points_used=len(points),
+    )
+
+
+def calculate_notch_sensitivity(
+    kt: float,
+    notch_radius_mm: float,
+    notch_constant_mm: float,
+    model: str,
+) -> NotchSensitivityResult:
+    """Calculate notch sensitivity q and fatigue concentration Kf.
+
+    Neuber: q = 1 / (1 + sqrt(a/r))
+    Kuhn-Hardrath: q = 1 / (1 + a/r)
+    """
+    if kt < 1.0:
+        raise ValueError("Kt must be >= 1")
+    if notch_radius_mm <= 0.0 or notch_constant_mm <= 0.0:
+        raise ValueError("Notch radius and notch constant must be > 0")
+
+    key = model.lower().strip()
+    ratio = notch_constant_mm / notch_radius_mm
+
+    if key == "neuber":
+        q = 1.0 / (1.0 + float(np.sqrt(ratio)))
+    elif key == "kuhn_hardrath":
+        q = 1.0 / (1.0 + ratio)
+    else:
+        raise ValueError("Unknown notch model. Valid: neuber, kuhn_hardrath")
+
+    q = float(np.clip(q, 0.0, 1.0))
+    kf = 1.0 + q * (kt - 1.0)
+    kf = float(np.clip(kf, 1.0, kt))
+
+    return NotchSensitivityResult(model=key, kt=float(kt), q=q, kf=kf)
+
+
+def palmgren_miner_damage(
+    blocks: list[LoadingBlock],
+    sigma_f_prime: float,
+    b: float,
+    se: float,
+    sut: float,
+    sy: float,
+    model: str,
+) -> MinerDamageResult:
+    """Compute cumulative damage with Palmgren-Miner linear rule."""
+    if len(blocks) == 0:
+        raise ValueError("At least one loading block is required")
+
+    total_damage = 0.0
+    block_results: list[MinerBlockResult] = []
+
+    for idx, block in enumerate(blocks):
+        if block.cycles <= 0.0 or block.repeats < 1:
+            raise ValueError("Each loading block must have cycles > 0 and repeats >= 1")
+
+        sa = (block.max_stress - block.min_stress) / 2.0
+        sm = (block.max_stress + block.min_stress) / 2.0
+        correction = get_mean_stress_correction(
+            model=model,
+            stress_amplitude=sa,
+            mean_stress=sm,
+            se=se,
+            sut=sut,
+            sy=sy,
+            sigma_f_prime=sigma_f_prime,
+        )
+
+        eq_sa = correction.equivalent_alternating_stress
+        nf = (
+            basquin_cycles_to_failure(eq_sa, sigma_f_prime, b)
+            if np.isfinite(eq_sa)
+            else None
+        )
+
+        applied_cycles = float(block.cycles * block.repeats)
+        if nf is None or nf <= 0.0:
+            damage = float("inf") if applied_cycles > 0 else 0.0
+        else:
+            damage = applied_cycles / nf
+
+        total_damage += damage
+        block_results.append(
+            MinerBlockResult(
+                block_index=idx,
+                stress_amplitude=float(sa),
+                mean_stress=float(sm),
+                equivalent_alternating_stress=float(eq_sa),
+                cycles_to_failure=nf,
+                applied_cycles=applied_cycles,
+                damage=float(damage),
+            )
+        )
+
+    predicted_blocks_to_failure: Optional[float]
+    if not np.isfinite(total_damage) or total_damage <= 0.0:
+        predicted_blocks_to_failure = None if not np.isfinite(total_damage) else float("inf")
+    else:
+        predicted_blocks_to_failure = 1.0 / total_damage
+
+    return MinerDamageResult(
+        total_damage=float(total_damage),
+        predicted_blocks_to_failure=predicted_blocks_to_failure,
+        is_failure=bool(total_damage >= 1.0),
+        block_results=block_results,
+    )
+
+
 # ---------------------------------------------------------------------------
 # S-N curve generation
 # ---------------------------------------------------------------------------
@@ -582,6 +811,10 @@ def run_full_analysis(
     kd: float = 1.0,
     ke: float = 1.0,
     num_points: int = 100,
+    selected_mean_stress_model: str = "goodman",
+    sn_fit_points: Optional[list[dict[str, float]]] = None,
+    notch: Optional[dict[str, float | str]] = None,
+    loading_blocks: Optional[list[dict[str, float | int]]] = None,
 ) -> dict:
     """Execute a complete fatigue life analysis.
 
@@ -636,12 +869,33 @@ def run_full_analysis(
     )
     elastic_modulus_mpa = elastic_modulus_gpa * 1000.0
 
+    basquin_fit: Optional[BasquinFitResult] = None
+    if sn_fit_points is not None and len(sn_fit_points) > 0:
+        parsed_points = [
+            SNDataPoint(cycles=float(p["cycles"]), stress=float(p["stress"]))
+            for p in sn_fit_points
+        ]
+        basquin_fit = fit_basquin_from_points(parsed_points)
+        sigma_f_prime = basquin_fit.sigma_f_prime
+        b_exponent = basquin_fit.b
+
     # --- Modified endurance limit ---
     se = calculate_modified_endurance_limit(
         uts_mpa=uts,
         endurance_limit=endurance_limit,
         ka=ka, kb=kb, kc=kc, kd=kd, ke=ke,
     )
+
+    # --- Optional notch correction ---
+    notch_result: Optional[NotchSensitivityResult] = None
+    if notch is not None:
+        notch_result = calculate_notch_sensitivity(
+            kt=float(notch["kt"]),
+            notch_radius_mm=float(notch["notch_radius_mm"]),
+            notch_constant_mm=float(notch.get("notch_constant_mm", 0.25)),
+            model=str(notch["model"]),
+        )
+        stress_amplitude *= notch_result.kf
 
     # --- Cycles to failure (Basquin) ---
     basquin_nf = basquin_cycles_to_failure(stress_amplitude, sigma_f_prime, b_exponent)
@@ -685,6 +939,18 @@ def run_full_analysis(
         else:
             cycles_to_failure[key] = None
 
+    selected_result = get_mean_stress_correction(
+        model=selected_mean_stress_model,
+        stress_amplitude=stress_amplitude,
+        mean_stress=mean_stress,
+        se=se,
+        sut=uts,
+        sy=yield_strength,
+        sigma_f_prime=sigma_f_prime,
+    )
+    selected_key = selected_result.model_name.lower()
+    selected_cycles_to_failure = cycles_to_failure.get(selected_key)
+
     # --- S-N curve ---
     sn_data = generate_sn_curve(sigma_f_prime, b_exponent, num_points)
 
@@ -693,6 +959,27 @@ def run_full_analysis(
     gerber_env = generate_gerber_envelope(se, uts)
     soderberg_env = generate_soderberg_envelope(se, yield_strength)
     morrow_env = generate_morrow_envelope(se, sigma_f_prime)
+
+    miner_damage_result: Optional[MinerDamageResult] = None
+    if loading_blocks is not None and len(loading_blocks) > 0:
+        blocks = [
+            LoadingBlock(
+                max_stress=float(item["max_stress"]),
+                min_stress=float(item["min_stress"]),
+                cycles=float(item["cycles"]),
+                repeats=int(item.get("repeats", 1)),
+            )
+            for item in loading_blocks
+        ]
+        miner_damage_result = palmgren_miner_damage(
+            blocks=blocks,
+            sigma_f_prime=sigma_f_prime,
+            b=b_exponent,
+            se=se,
+            sut=uts,
+            sy=yield_strength,
+            model=selected_mean_stress_model,
+        )
 
     return {
         "stress_amplitude": float(stress_amplitude),
@@ -709,11 +996,59 @@ def run_full_analysis(
             }
             for r in corrections
         ],
+        "selected_mean_stress_model": selected_result.model_name,
+        "selected_mean_stress_result": {
+            "model_name": selected_result.model_name,
+            "safety_factor": selected_result.safety_factor,
+            "equivalent_alternating_stress": selected_result.equivalent_alternating_stress,
+            "is_safe": selected_result.is_safe,
+        },
+        "selected_cycles_to_failure": selected_cycles_to_failure,
         "sn_curve_data": [
             {"cycles": p.cycles, "stress": p.stress} for p in sn_data
         ],
+        "basquin_fit": {
+            "a": basquin_fit.a,
+            "b": basquin_fit.b,
+            "sigma_f_prime": basquin_fit.sigma_f_prime,
+            "r_squared": basquin_fit.r_squared,
+            "points_used": basquin_fit.points_used,
+        }
+        if basquin_fit is not None
+        else None,
         "goodman_envelope": goodman_env,
         "gerber_envelope": gerber_env,
         "soderberg_envelope": soderberg_env,
         "morrow_envelope": morrow_env,
+        "operating_point": {
+            "mean_stress": float(mean_stress),
+            "stress_amplitude": float(stress_amplitude),
+        },
+        "notch_result": {
+            "model": notch_result.model,
+            "kt": notch_result.kt,
+            "q": notch_result.q,
+            "kf": notch_result.kf,
+        }
+        if notch_result is not None
+        else None,
+        "miner_damage": {
+            "total_damage": miner_damage_result.total_damage,
+            "predicted_blocks_to_failure": miner_damage_result.predicted_blocks_to_failure,
+            "is_failure": miner_damage_result.is_failure,
+            "block_results": [
+                {
+                    "block_index": r.block_index,
+                    "stress_amplitude": r.stress_amplitude,
+                    "mean_stress": r.mean_stress,
+                    "equivalent_alternating_stress": r.equivalent_alternating_stress,
+                    "cycles_to_failure": r.cycles_to_failure,
+                    "applied_cycles": r.applied_cycles,
+                    "damage": r.damage,
+                }
+                for r in miner_damage_result.block_results
+            ],
+        }
+        if miner_damage_result is not None
+        else None,
     }

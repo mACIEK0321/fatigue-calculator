@@ -1,4 +1,4 @@
-"""Pydantic models for the FatigueSim Pro fatigue analysis API.
+"""Pydantic models for the FatigueMaster Pro fatigue analysis API.
 
 All stress values are in MPa unless otherwise noted.
 All modulus values are in GPa unless otherwise noted.
@@ -17,6 +17,21 @@ class SurfaceFinishType(str, Enum):
     machined = "machined"
     hot_rolled = "hot_rolled"
     forged = "forged"
+
+
+class MeanStressModel(str, Enum):
+    """Supported mean stress correction models for design evaluation."""
+
+    goodman = "goodman"
+    gerber = "gerber"
+    soderberg = "soderberg"
+
+
+class NotchModel(str, Enum):
+    """Supported notch sensitivity models."""
+
+    neuber = "neuber"
+    kuhn_hardrath = "kuhn_hardrath"
 
 
 class MaterialProperties(BaseModel):
@@ -62,6 +77,35 @@ class MarinFactors(BaseModel):
     reliability_factor: float = Field(1.0, description="Reliability factor ke")
 
 
+class SNFitPoint(BaseModel):
+    """S-N point supplied by user for Basquin curve fitting."""
+
+    cycles: float = Field(..., description="Cycles N", gt=0)
+    stress: float = Field(..., description="Stress amplitude S in MPa", gt=0)
+
+
+class NotchSensitivityInput(BaseModel):
+    """Inputs for notch sensitivity and fatigue stress concentration."""
+
+    model: NotchModel = Field(..., description="Notch sensitivity model")
+    kt: float = Field(..., description="Theoretical stress concentration factor Kt", ge=1.0)
+    notch_radius_mm: float = Field(..., description="Notch root radius in mm", gt=0)
+    notch_constant_mm: float = Field(
+        0.25,
+        description="Material notch constant in mm",
+        gt=0,
+    )
+
+
+class LoadingBlock(BaseModel):
+    """Single loading block for Palmgren-Miner accumulation."""
+
+    max_stress: float = Field(..., description="Maximum cyclic stress in MPa")
+    min_stress: float = Field(..., description="Minimum cyclic stress in MPa")
+    cycles: float = Field(..., description="Applied cycles per block", gt=0)
+    repeats: int = Field(1, description="Block repeats", ge=1)
+
+
 class SurfaceFinishInput(BaseModel):
     """Input for empirical surface factor calculation.
 
@@ -98,6 +142,22 @@ class FatigueAnalysisRequest(BaseModel):
         ge=10,
         le=1000,
     )
+    selected_mean_stress_model: MeanStressModel = Field(
+        MeanStressModel.goodman,
+        description="Mean stress model used as primary design criterion",
+    )
+    sn_fit_points: Optional[list[SNFitPoint]] = Field(
+        None,
+        description="Optional user S-N points for Basquin fitting",
+    )
+    notch: Optional[NotchSensitivityInput] = Field(
+        None,
+        description="Optional notch sensitivity input",
+    )
+    loading_blocks: Optional[list[LoadingBlock]] = Field(
+        None,
+        description="Optional loading blocks for Palmgren-Miner damage",
+    )
 
 
 class MeanStressCorrectionResult(BaseModel):
@@ -118,6 +178,52 @@ class SNDataPoint(BaseModel):
 
     cycles: float = Field(..., description="Number of cycles N")
     stress: float = Field(..., description="Stress amplitude in MPa")
+
+
+class BasquinFitResult(BaseModel):
+    """Power law fit result for user-provided S-N points."""
+
+    a: float = Field(..., description="Basquin coefficient for S = a*N^b")
+    b: float = Field(..., description="Basquin exponent")
+    sigma_f_prime: float = Field(..., description="Equivalent sigma_f' for S = sigma_f'*(2N)^b")
+    r_squared: float = Field(..., description="Coefficient of determination")
+    points_used: int = Field(..., description="Number of points used in fitting")
+
+
+class NotchSensitivityResult(BaseModel):
+    """Calculated notch sensitivity result."""
+
+    model: str = Field(..., description="Notch sensitivity model")
+    kt: float = Field(..., description="Theoretical stress concentration factor")
+    q: float = Field(..., description="Notch sensitivity factor")
+    kf: float = Field(..., description="Fatigue stress concentration factor")
+
+
+class MinerBlockResult(BaseModel):
+    """Damage result for one loading block."""
+
+    block_index: int = Field(..., description="Zero-based block index")
+    stress_amplitude: float = Field(..., description="Alternating stress in MPa")
+    mean_stress: float = Field(..., description="Mean stress in MPa")
+    equivalent_alternating_stress: float = Field(..., description="Corrected equivalent alternating stress in MPa")
+    cycles_to_failure: Optional[float] = Field(..., description="Predicted cycles to failure for block")
+    applied_cycles: float = Field(..., description="Applied cycles in this block")
+    damage: float = Field(..., description="Miner damage contribution")
+
+
+class MinerDamageResult(BaseModel):
+    """Palmgren-Miner cumulative damage result."""
+
+    total_damage: float = Field(..., description="Total cumulative Miner damage")
+    predicted_blocks_to_failure: Optional[float] = Field(
+        None,
+        description="Estimated repetitions to failure at same sequence",
+    )
+    is_failure: bool = Field(..., description="True when cumulative damage >= 1")
+    block_results: list[MinerBlockResult] = Field(
+        ...,
+        description="Per-block damage breakdown",
+    )
 
 
 class FatigueAnalysisResponse(BaseModel):
@@ -142,8 +248,21 @@ class FatigueAnalysisResponse(BaseModel):
     mean_stress_corrections: list[MeanStressCorrectionResult] = Field(
         ..., description="Results from each mean stress correction model"
     )
+    selected_mean_stress_model: str = Field(
+        ..., description="Primary selected mean stress model"
+    )
+    selected_mean_stress_result: MeanStressCorrectionResult = Field(
+        ..., description="Result for selected mean stress model"
+    )
+    selected_cycles_to_failure: Optional[float] = Field(
+        ..., description="Cycles to failure from selected model"
+    )
     sn_curve_data: list[SNDataPoint] = Field(
         ..., description="S-N curve data points for plotting"
+    )
+    basquin_fit: Optional[BasquinFitResult] = Field(
+        None,
+        description="Fitted Basquin parameters from user S-N points",
     )
     goodman_envelope: list[dict] = Field(
         ..., description="Goodman failure envelope points"
@@ -156,4 +275,15 @@ class FatigueAnalysisResponse(BaseModel):
     )
     morrow_envelope: list[dict] = Field(
         ..., description="Morrow failure envelope points"
+    )
+    operating_point: dict = Field(
+        ..., description="Operating point on Haigh diagram"
+    )
+    notch_result: Optional[NotchSensitivityResult] = Field(
+        None,
+        description="Calculated notch sensitivity values",
+    )
+    miner_damage: Optional[MinerDamageResult] = Field(
+        None,
+        description="Palmgren-Miner cumulative damage result",
     )

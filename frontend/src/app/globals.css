@@ -4,6 +4,10 @@ html,
 body {
   background-color: #020617;
   color: #f8fafc;
+  background-image:
+    linear-gradient(rgba(56, 189, 248, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(56, 189, 248, 0.06) 1px, transparent 1px);
+  background-size: 28px 28px;
 }
 
 /* Custom scrollbar for dark theme */

@@ -16,9 +16,9 @@ export default function Home() {
             <Activity className="h-6 w-6 text-white" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-white">FatigueSim Pro</h1>
+            <h1 className="text-xl font-bold text-white">FatigueMaster Pro</h1>
             <p className="text-xs text-slate-400">
-              Advanced Fatigue Life Analysis
+              Industrial Fatigue Life Estimation Platform
             </p>
           </div>
         </div>
@@ -26,19 +26,19 @@ export default function Home() {
 
       {/* Content */}
       <div className="mx-auto max-w-7xl px-6 py-6">
-        <Tabs defaultValue="analysis">
+        <Tabs defaultValue="research">
           <TabsList className="mb-6">
-            <TabsTrigger value="analysis">Analysis Engine</TabsTrigger>
-            <TabsTrigger value="research">Research &amp; Theory</TabsTrigger>
+            <TabsTrigger value="research">Research &amp; Problem Definition</TabsTrigger>
+            <TabsTrigger value="analysis">Core Analysis Engine</TabsTrigger>
             <TabsTrigger value="workflow">Workflow Pipeline</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="analysis">
-            <AnalysisEngine />
-          </TabsContent>
-
           <TabsContent value="research">
             <ResearchContent />
+          </TabsContent>
+
+          <TabsContent value="analysis">
+            <AnalysisEngine />
           </TabsContent>
 
           <TabsContent value="workflow">

@@ -52,10 +52,12 @@ export default function ResultsPanel({ results }: ResultsPanelProps) {
     );
   }
 
-  const goodmanResult = results.mean_stress_corrections.find(
-    (r) => r.model.toLowerCase() === "goodman"
-  );
-  const isSafe = goodmanResult ? goodmanResult.safety_factor > 1 : false;
+  const selectedResult = results.selected_mean_stress_result;
+  const isSafe = selectedResult.safety_factor > 1;
+  const safetyFactor = selectedResult.safety_factor;
+  const gaugeRatio = Math.max(0, Math.min(2, safetyFactor)) / 2;
+  const gaugeAngle = -90 + gaugeRatio * 180;
+  const cyclesFromSelected = results.selected_cycles_to_failure;
 
   return (
     <div className="space-y-4">
@@ -82,9 +84,52 @@ export default function ResultsPanel({ results }: ResultsPanelProps) {
               {isSafe ? "SAFE" : "UNSAFE"}
             </p>
             <p className="text-sm text-slate-400">
-              Based on Goodman criterion (SF ={" "}
-              {goodmanResult ? goodmanResult.safety_factor.toFixed(3) : "N/A"})
+              Based on {selectedResult.model_name} criterion (SF = {safetyFactor.toFixed(3)})
             </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Live Dashboard</CardTitle>
+        </CardHeader>
+        <CardContent className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <div className="rounded-lg border border-slate-700 bg-slate-900 p-3">
+            <p className="text-xs text-slate-400">Safe / Fail Gauge</p>
+            <div className="relative mt-3 h-28">
+              <svg viewBox="0 0 200 110" className="h-24 w-full">
+                <path d="M 20 100 A 80 80 0 0 1 100 20" fill="none" stroke="#f59e0b" strokeWidth="14" />
+                <path d="M 100 20 A 80 80 0 0 1 180 100" fill="none" stroke="#22d3ee" strokeWidth="14" />
+                <line
+                  x1="100"
+                  y1="100"
+                  x2={100 + 66 * Math.cos((gaugeAngle * Math.PI) / 180)}
+                  y2={100 + 66 * Math.sin((gaugeAngle * Math.PI) / 180)}
+                  stroke={isSafe ? "#22d3ee" : "#ef4444"}
+                  strokeWidth="4"
+                />
+                <circle cx="100" cy="100" r="6" fill="#e2e8f0" />
+              </svg>
+              <p className={`text-center text-lg font-semibold ${isSafe ? "text-cyan-300" : "text-red-400"}`}>
+                SF {safetyFactor.toFixed(2)}
+              </p>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-slate-700 bg-slate-900 p-3 text-center">
+            <p className="text-xs text-slate-400">Calculated Life (N)</p>
+            <p className="mt-3 text-lg font-semibold text-cyan-300">
+              {cyclesFromSelected && cyclesFromSelected > 0 ? formatCycles(cyclesFromSelected) : "N/A"}
+            </p>
+          </div>
+
+          <div className="rounded-lg border border-slate-700 bg-slate-900 p-3 text-center">
+            <p className="text-xs text-slate-400">Factor of Safety</p>
+            <p className={`mt-3 text-2xl font-bold ${isSafe ? "text-cyan-300" : "text-red-400"}`}>
+              {safetyFactor.toFixed(3)}
+            </p>
+            <p className="text-xs text-slate-500">Model: {results.selected_mean_stress_model}</p>
           </div>
         </CardContent>
       </Card>
@@ -141,14 +186,14 @@ export default function ResultsPanel({ results }: ResultsPanelProps) {
           <div className="space-y-2">
             {results.mean_stress_corrections.map((correction) => (
               <div
-                key={correction.model}
+                key={correction.model_name}
                 className="flex items-center justify-between rounded-lg bg-slate-800 px-3 py-2"
               >
                 <span className="text-sm text-slate-300">
-                  {correction.model}
+                  {correction.model_name}
                 </span>
                 <span className="font-mono text-sm text-slate-100">
-                  {formatCycles(correction.cycles_to_failure)}
+                  {formatCycles(results.cycles_to_failure[correction.model_name.toLowerCase()] ?? Number.NaN)}
                 </span>
               </div>
             ))}
@@ -167,11 +212,11 @@ export default function ResultsPanel({ results }: ResultsPanelProps) {
               const safe = correction.safety_factor > 1;
               return (
                 <div
-                  key={correction.model}
+                  key={correction.model_name}
                   className="flex items-center justify-between rounded-lg bg-slate-800 px-3 py-2"
                 >
                   <span className="text-sm text-slate-300">
-                    {correction.model}
+                    {correction.model_name}
                   </span>
                   <span
                     className={`font-mono text-sm font-semibold ${
@@ -186,6 +231,74 @@ export default function ResultsPanel({ results }: ResultsPanelProps) {
           </div>
         </CardContent>
       </Card>
+
+      {results.notch_result && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Notch Sensitivity</CardTitle>
+          </CardHeader>
+          <CardContent className="grid grid-cols-2 gap-3">
+            <div className="rounded-lg bg-slate-800 p-3 text-center">
+              <p className="text-xs text-slate-400">Model</p>
+              <p className="mt-1 text-sm font-semibold text-cyan-300">{results.notch_result.model}</p>
+            </div>
+            <div className="rounded-lg bg-slate-800 p-3 text-center">
+              <p className="text-xs text-slate-400">Kf</p>
+              <p className="mt-1 text-sm font-semibold text-cyan-300">{results.notch_result.kf.toFixed(3)}</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {results.miner_damage && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Palmgren-Miner Damage</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <div className="flex items-center justify-between rounded-lg bg-slate-800 px-3 py-2">
+              <span className="text-sm text-slate-300">Total Damage D</span>
+              <span className={`font-mono ${results.miner_damage.is_failure ? "text-red-400" : "text-cyan-300"}`}>
+                {results.miner_damage.total_damage.toFixed(4)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between rounded-lg bg-slate-800 px-3 py-2">
+              <span className="text-sm text-slate-300">Blocks to Failure</span>
+              <span className="font-mono text-slate-100">
+                {results.miner_damage.predicted_blocks_to_failure
+                  ? results.miner_damage.predicted_blocks_to_failure.toFixed(3)
+                  : "N/A"}
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {results.basquin_fit && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Fitted Basquin Parameters</CardTitle>
+          </CardHeader>
+          <CardContent className="grid grid-cols-2 gap-3 text-sm">
+            <div className="rounded-lg bg-slate-800 p-3">
+              <p className="text-xs text-slate-400">a</p>
+              <p className="font-mono text-cyan-300">{results.basquin_fit.a.toExponential(3)}</p>
+            </div>
+            <div className="rounded-lg bg-slate-800 p-3">
+              <p className="text-xs text-slate-400">b</p>
+              <p className="font-mono text-cyan-300">{results.basquin_fit.b.toFixed(5)}</p>
+            </div>
+            <div className="rounded-lg bg-slate-800 p-3">
+              <p className="text-xs text-slate-400">σ&apos;f</p>
+              <p className="font-mono text-cyan-300">{results.basquin_fit.sigma_f_prime.toFixed(2)} MPa</p>
+            </div>
+            <div className="rounded-lg bg-slate-800 p-3">
+              <p className="text-xs text-slate-400">R²</p>
+              <p className="font-mono text-cyan-300">{results.basquin_fit.r_squared.toFixed(4)}</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
