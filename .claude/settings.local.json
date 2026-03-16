@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install:*)",
+      "Bash(python3 -m pip install fastapi pydantic numpy scipy pytest)",
+      "Bash(ls /c/Python*/python.exe)",
+      "Read(//c/Program Files/**)",
+      "Read(//c/Users/mkola/AppData/Local/Programs/**)",
+      "Bash(where.exe python:*)",
+      "Bash(\"/c/Users/mkola/AppData/Local/Microsoft/WindowsApps/python.exe\" --version)",
+      "Bash(py --version)",
+      "Bash(py -3 --version)",
+      "Bash(npx create-next-app@latest . --typescript --tailwind --eslint --app --src-dir --import-alias \"@/*\" --use-npm --no-turbopack)",
+      "Bash(npm install:*)",
+      "Bash(npx next:*)",
+      "Bash(py --list-paths)",
+      "Bash(where python:*)",
+      "Bash(python3 -m pip --version)",
+      "mcp__Claude_Preview__preview_start"
+    ]
+  }
+}
