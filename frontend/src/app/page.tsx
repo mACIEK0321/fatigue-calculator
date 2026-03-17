@@ -4,7 +4,7 @@ import { Activity } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import AnalysisEngine from "@/components/analysis/AnalysisEngine";
 import ResearchContent from "@/components/research/ResearchContent";
-import WorkflowPipeline from "@/components/workflow/WorkflowPipeline";
+import WorkflowComponent from "@/components/workflow/WorkflowComponent";
 
 export default function Home() {
   return (
@@ -42,7 +42,7 @@ export default function Home() {
           </TabsContent>
 
           <TabsContent value="workflow">
-            <WorkflowPipeline />
+            <WorkflowComponent />
           </TabsContent>
         </Tabs>
       </div>

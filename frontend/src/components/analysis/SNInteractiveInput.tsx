@@ -11,6 +11,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import type { TooltipProps, TooltipValueType } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,6 +35,20 @@ interface SNInteractiveInputProps {
 const margins = { top: 20, right: 24, left: 56, bottom: 32 };
 const xMin = 1;
 const xMax = 1e9;
+
+type TooltipFormatter = NonNullable<TooltipProps<TooltipValueType, string | number>["formatter"]>
+
+const tooltipFormatter: TooltipFormatter = (value, name) => {
+  if (value === undefined) {
+    return ["N/A", name ?? "value"];
+  }
+
+  const normalized = Array.isArray(value)
+    ? value.map((entry) => Number(entry).toFixed(2)).join(", ")
+    : Number(value).toFixed(2);
+
+  return [normalized, name ?? "value"];
+};
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -262,7 +277,7 @@ export default function SNInteractiveInput({ points, onPointsChange, onFitChange
                   />
                   <Tooltip
                     contentStyle={{ backgroundColor: "#0f172a", border: "1px solid #334155", color: "#e2e8f0" }}
-                    formatter={(value: number | string, name: string) => [Number(value).toFixed(2), name]}
+                    formatter={tooltipFormatter}
                   />
                   <Scatter data={sanitizedPoints} dataKey="stress" fill="#22d3ee" name="Input points" />
                   <Line
