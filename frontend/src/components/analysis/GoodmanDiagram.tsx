@@ -2,98 +2,86 @@
 
 import React from "react";
 import {
+  CartesianGrid,
   ComposedChart,
+  Legend,
   Line,
+  ResponsiveContainer,
   Scatter,
-  Area,
+  Tooltip,
   XAxis,
   YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
 } from "recharts";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import type { GoodmanEnvelope } from "@/types/fatigue";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import type { HaighDiagramData, MeanStressModel } from "@/types/fatigue";
 
 interface GoodmanDiagramProps {
-  goodmanEnvelope: GoodmanEnvelope[];
-  gerberEnvelope: GoodmanEnvelope[];
-  soderbergEnvelope: GoodmanEnvelope[];
-  morrowEnvelope: GoodmanEnvelope[];
-  operatingPoint: { mean_stress: number; stress_amplitude: number } | null;
+  diagram: HaighDiagramData | null;
+  selectedModel: MeanStressModel | null;
+}
+
+function labelForModel(model: string): string {
+  return model.charAt(0).toUpperCase() + model.slice(1);
 }
 
 export default function GoodmanDiagram({
-  goodmanEnvelope,
-  gerberEnvelope,
-  soderbergEnvelope,
-  morrowEnvelope,
-  operatingPoint,
+  diagram,
+  selectedModel,
 }: GoodmanDiagramProps) {
-  const hasData =
-    goodmanEnvelope.length > 0 ||
-    gerberEnvelope.length > 0 ||
-    soderbergEnvelope.length > 0 ||
-    morrowEnvelope.length > 0;
-
-  if (!hasData) {
+  if (!diagram) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Haigh Diagram (Mean vs Alternating Stress)</CardTitle>
+          <CardTitle className="text-base">Haigh Diagram</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="flex h-64 items-center justify-center text-slate-500">
-            Run an analysis to see the Haigh diagram
+            Run an analysis to see the Haigh diagram.
           </div>
         </CardContent>
       </Card>
     );
   }
 
-  // Merge all envelopes into a single dataset keyed by mean_stress
-  const mergedMap = new Map<number, Record<string, number>>();
+  const envelopeData = diagram.goodman_envelope.map((point, index) => ({
+    mean_stress: point.mean_stress,
+    goodman: point.stress_amplitude,
+    gerber: diagram.gerber_envelope[index]?.stress_amplitude,
+    soderberg: diagram.soderberg_envelope[index]?.stress_amplitude,
+    morrow: diagram.morrow_envelope[index]?.stress_amplitude,
+  }));
 
-  const addToMap = (envelope: GoodmanEnvelope[], key: string) => {
-    envelope.forEach((pt) => {
-      const ms = Math.round(pt.mean_stress * 100) / 100;
-      if (!mergedMap.has(ms)) {
-        mergedMap.set(ms, { mean_stress: ms });
-      }
-      mergedMap.get(ms)![key] = pt.stress_amplitude;
-    });
-  };
+  const operatingPointData = [
+    {
+      mean_stress: diagram.operating_point.mean_stress,
+      stress_amplitude: diagram.operating_point.stress_amplitude,
+    },
+  ];
 
-  addToMap(goodmanEnvelope, "goodman");
-  addToMap(gerberEnvelope, "gerber");
-  addToMap(soderbergEnvelope, "soderberg");
-  addToMap(morrowEnvelope, "morrow");
-
-  const chartData = Array.from(mergedMap.values()).sort(
-    (a, b) => a.mean_stress - b.mean_stress
-  );
-
-  // Operating point as scatter data
-  const scatterData = operatingPoint
+  const correctedPointData = diagram.corrected_operating_point
     ? [
         {
-          mean_stress: operatingPoint.mean_stress,
-          operating: operatingPoint.stress_amplitude,
+          mean_stress: diagram.corrected_operating_point.mean_stress,
+          stress_amplitude: diagram.corrected_operating_point.stress_amplitude,
         },
       ]
     : [];
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Haigh Diagram (Goodman/Gerber/Soderberg)</CardTitle>
+      <CardHeader className="space-y-2">
+        <CardTitle className="text-base">Haigh Diagram</CardTitle>
+        <p className="text-sm text-slate-400">
+          The raw operating point is plotted together with the corrected point
+          used by the selected mean stress model
+          {selectedModel ? ` (${labelForModel(selectedModel)})` : ""}.
+        </p>
       </CardHeader>
-      <CardContent>
-        <ResponsiveContainer width="100%" height={350}>
+      <CardContent className="space-y-3">
+        <ResponsiveContainer width="100%" height={340}>
           <ComposedChart
-            data={chartData}
-            margin={{ top: 5, right: 30, left: 20, bottom: 25 }}
+            data={envelopeData}
+            margin={{ top: 10, right: 30, left: 20, bottom: 25 }}
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
             <XAxis
@@ -102,7 +90,7 @@ export default function GoodmanDiagram({
               stroke="#94a3b8"
               tick={{ fill: "#94a3b8", fontSize: 11 }}
               label={{
-                value: "Mean Stress (MPa)",
+                value: "Mean stress (MPa)",
                 position: "insideBottom",
                 offset: -15,
                 fill: "#cbd5e1",
@@ -114,7 +102,7 @@ export default function GoodmanDiagram({
               stroke="#94a3b8"
               tick={{ fill: "#94a3b8", fontSize: 11 }}
               label={{
-                value: "Stress Amplitude (MPa)",
+                value: "Stress amplitude (MPa)",
                 angle: -90,
                 position: "insideLeft",
                 offset: -5,
@@ -124,31 +112,20 @@ export default function GoodmanDiagram({
             />
             <Tooltip
               contentStyle={{
-                backgroundColor: "#1e293b",
-                border: "1px solid #475569",
+                backgroundColor: "#0f172a",
+                border: "1px solid #334155",
                 borderRadius: "8px",
-                color: "#f1f5f9",
+                color: "#f8fafc",
               }}
               formatter={(value, name) => [
                 `${Number(value).toFixed(1)} MPa`,
-                String(name).charAt(0).toUpperCase() + String(name).slice(1),
+                String(name),
               ]}
               labelFormatter={(label) =>
-                `Mean Stress: ${Number(label).toFixed(1)} MPa`
+                `Mean stress: ${Number(label).toFixed(1)} MPa`
               }
             />
-            <Legend
-              wrapperStyle={{ color: "#cbd5e1", fontSize: 12, paddingTop: 8 }}
-            />
-            <Area
-              type="monotone"
-              dataKey="goodman"
-              stroke="none"
-              fill="#3b82f6"
-              fillOpacity={0.1}
-              name="Safe Zone"
-              legendType="none"
-            />
+            <Legend wrapperStyle={{ color: "#cbd5e1", fontSize: 12 }} />
             <Line
               type="monotone"
               dataKey="goodman"
@@ -182,15 +159,36 @@ export default function GoodmanDiagram({
               name="Morrow"
             />
             <Scatter
-              data={scatterData}
-              dataKey="operating"
+              data={operatingPointData}
+              dataKey="stress_amplitude"
               fill="#ef4444"
-              name="Operating Point"
-              shape="circle"
-              legendType="circle"
+              name="Operating point"
             />
+            {correctedPointData.length > 0 ? (
+              <Scatter
+                data={correctedPointData}
+                dataKey="stress_amplitude"
+                fill="#f59e0b"
+                name="Corrected point"
+              />
+            ) : null}
           </ComposedChart>
         </ResponsiveContainer>
+
+        <div className="rounded-lg border border-slate-700 bg-slate-900/60 p-3 text-sm text-slate-400">
+          {diagram.corrected_operating_point ? (
+            <p>
+              The corrected point is the fully reversed equivalent point used by
+              the selected mean stress correction to compute the primary life
+              result.
+            </p>
+          ) : (
+            <p>
+              No corrected point is shown because the selected mean stress model
+              exceeded its valid stress limit.
+            </p>
+          )}
+        </div>
       </CardContent>
     </Card>
   );

@@ -1,3 +1,25 @@
+export type SurfaceFinishType =
+  | "ground"
+  | "machined"
+  | "hot_rolled"
+  | "forged";
+
+export type SurfaceFactorMode =
+  | "empirical_surface_finish"
+  | "manual_factor";
+
+export type MeanStressModel =
+  | "goodman"
+  | "gerber"
+  | "soderberg"
+  | "morrow";
+
+export type NotchModel = "neuber" | "kuhn_hardrath";
+
+export type SNCurveSourceMode = "material_basquin" | "points_fit";
+
+export type FatigueLifeStatus = "finite" | "infinite";
+
 export interface MaterialProperties {
   uts: number;
   yield_strength: number;
@@ -10,16 +32,16 @@ export interface MaterialProperties {
 }
 
 export interface MarinFactors {
-  surface_factor: number;
   size_factor: number;
   load_factor: number;
   temperature_factor: number;
   reliability_factor: number;
 }
 
-export interface SurfaceFinishInput {
-  finish_type: "ground" | "machined" | "hot_rolled" | "forged";
-  uts: number;
+export interface SurfaceFactorSelection {
+  mode: SurfaceFactorMode;
+  finish_type?: SurfaceFinishType;
+  surface_factor?: number;
 }
 
 export interface SNFitPoint {
@@ -27,8 +49,13 @@ export interface SNFitPoint {
   stress: number;
 }
 
+export interface SNCurveSourceInput {
+  mode: SNCurveSourceMode;
+  points?: SNFitPoint[];
+}
+
 export interface NotchSensitivityInput {
-  model: "neuber" | "kuhn_hardrath";
+  model: NotchModel;
   kt: number;
   notch_radius_mm: number;
   notch_constant_mm: number;
@@ -45,30 +72,33 @@ export interface FatigueAnalysisRequest {
   material: MaterialProperties;
   max_stress: number;
   min_stress: number;
-  surface_finish?: SurfaceFinishInput;
-  marin_factors?: MarinFactors;
+  sn_curve_source: SNCurveSourceInput;
+  surface_factor_selection: SurfaceFactorSelection;
+  marin_factors: MarinFactors;
   num_points?: number;
-  selected_mean_stress_model?: "goodman" | "gerber" | "soderberg";
-  sn_fit_points?: SNFitPoint[];
+  selected_mean_stress_model?: MeanStressModel;
   notch?: NotchSensitivityInput;
   loading_blocks?: LoadingBlock[];
 }
 
+export interface FatigueLifeResult {
+  status: FatigueLifeStatus;
+  cycles: number | null;
+  reason: string;
+}
+
 export interface MeanStressCorrectionResult {
-  model_name: string;
+  model_name: MeanStressModel;
+  effective_mean_stress: number;
   safety_factor: number;
-  equivalent_alternating_stress: number;
+  equivalent_alternating_stress: number | null;
   is_safe: boolean;
+  life: FatigueLifeResult;
 }
 
 export interface SNDataPoint {
   cycles: number;
   stress: number;
-}
-
-export interface GoodmanEnvelope {
-  mean_stress: number;
-  stress_amplitude: number;
 }
 
 export interface BasquinFitResult {
@@ -79,52 +109,102 @@ export interface BasquinFitResult {
   points_used: number;
 }
 
+export interface BasquinParameterSet {
+  sigma_f_prime: number;
+  b: number;
+  source: string;
+}
+
+export interface SNCurveSourceResult {
+  mode: SNCurveSourceMode;
+  basquin_parameters: BasquinParameterSet;
+  basquin_fit?: BasquinFitResult | null;
+}
+
 export interface NotchSensitivityResult {
-  model: string;
+  model: NotchModel;
   kt: number;
   q: number;
   kf: number;
 }
 
-export interface MinerBlockResult {
-  block_index: number;
+export interface StressState {
+  input_max_stress: number;
+  input_min_stress: number;
+  corrected_max_stress: number;
+  corrected_min_stress: number;
   stress_amplitude: number;
   mean_stress: number;
-  equivalent_alternating_stress: number;
-  cycles_to_failure: number | null;
+  stress_ratio: number;
+}
+
+export interface HaighPoint {
+  mean_stress: number;
+  stress_amplitude: number;
+}
+
+export interface SNChartPoint {
+  cycles: number | null;
+  display_cycles: number;
+  stress: number;
+  status: FatigueLifeStatus;
+  label: string;
+}
+
+export interface SNChartData {
+  curve: SNDataPoint[];
+  endurance_limit: number;
+  selected_point?: SNChartPoint | null;
+}
+
+export interface HaighDiagramData {
+  goodman_envelope: HaighPoint[];
+  gerber_envelope: HaighPoint[];
+  soderberg_envelope: HaighPoint[];
+  morrow_envelope: HaighPoint[];
+  operating_point: HaighPoint;
+  corrected_operating_point?: HaighPoint | null;
+}
+
+export interface MinerBlockResult {
+  block_index: number;
+  input_max_stress: number;
+  input_min_stress: number;
+  corrected_max_stress: number;
+  corrected_min_stress: number;
+  stress_amplitude: number;
+  mean_stress: number;
+  equivalent_alternating_stress: number | null;
+  life: FatigueLifeResult;
   applied_cycles: number;
-  damage: number;
+  damage: number | null;
 }
 
 export interface MinerDamageResult {
-  total_damage: number;
-  predicted_blocks_to_failure: number | null;
+  total_damage: number | null;
+  sequence_life: FatigueLifeResult;
   is_failure: boolean;
   block_results: MinerBlockResult[];
 }
 
 export interface FatigueAnalysisResponse {
-  stress_amplitude: number;
-  mean_stress: number;
-  stress_ratio: number;
+  stress_state: StressState;
   modified_endurance_limit: number;
-  cycles_to_failure: Record<string, number | null>;
+  sn_curve_source: SNCurveSourceResult;
+  cycles_to_failure: Record<MeanStressModel, FatigueLifeResult>;
   mean_stress_corrections: MeanStressCorrectionResult[];
-  selected_mean_stress_model: string;
+  selected_mean_stress_model: MeanStressModel;
   selected_mean_stress_result: MeanStressCorrectionResult;
-  selected_cycles_to_failure: number | null;
-  sn_curve_data: SNDataPoint[];
-  basquin_fit?: BasquinFitResult | null;
-  goodman_envelope: GoodmanEnvelope[];
-  gerber_envelope: GoodmanEnvelope[];
-  soderberg_envelope: GoodmanEnvelope[];
-  morrow_envelope: GoodmanEnvelope[];
-  operating_point: {
-    mean_stress: number;
-    stress_amplitude: number;
-  };
+  selected_life: FatigueLifeResult;
+  sn_chart: SNChartData;
+  haigh_diagram: HaighDiagramData;
   notch_result?: NotchSensitivityResult | null;
   miner_damage?: MinerDamageResult | null;
+}
+
+export interface SurfaceFinishInput {
+  finish_type: SurfaceFinishType;
+  uts: number;
 }
 
 export interface MaterialPreset {

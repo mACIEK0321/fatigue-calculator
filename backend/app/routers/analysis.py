@@ -1,8 +1,6 @@
-"""API router for fatigue analysis endpoints.
+"""API router for fatigue analysis endpoints."""
 
-Provides endpoints for full fatigue analysis, surface factor calculation,
-and material preset retrieval.
-"""
+import logging
 
 from fastapi import APIRouter, HTTPException
 
@@ -17,6 +15,7 @@ from app.models.schemas import (
 )
 
 router = APIRouter(prefix="/api", tags=["analysis"])
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Material presets
@@ -74,41 +73,19 @@ MATERIAL_PRESETS: list[dict] = [
 # ---------------------------------------------------------------------------
 @router.post("/analyze", response_model=FatigueAnalysisResponse)
 async def analyze_fatigue(request: FatigueAnalysisRequest) -> dict:
-    """Perform a complete fatigue life analysis.
-
-    Accepts cyclic loading parameters and material properties, returns
-    stress characterization, modified endurance limit, cycles to failure,
-    mean stress corrections, S-N curve data, and failure envelopes.
-    """
+    """Perform a complete fatigue life analysis."""
     mat = request.material
 
-    # Determine Marin factors
-    ka = 1.0
-    kb = 1.0
-    kc = 1.0
-    kd = 1.0
-    ke = 1.0
-
-    # If surface finish is provided, calculate ka from empirical formula
-    if request.surface_finish is not None:
-        try:
+    try:
+        if request.surface_factor_selection.mode.value == "empirical_surface_finish":
             ka = calculate_surface_factor(
-                request.surface_finish.finish_type.value,
-                request.surface_finish.uts,
+                request.surface_factor_selection.finish_type.value,
+                mat.uts,
             )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    # Override with explicit Marin factors if provided
-    if request.marin_factors is not None:
-        mf = request.marin_factors
-        # Only override ka from marin_factors if surface_finish was NOT given
-        if request.surface_finish is None:
-            ka = mf.surface_factor
-        kb = mf.size_factor
-        kc = mf.load_factor
-        kd = mf.temperature_factor
-        ke = mf.reliability_factor
+        else:
+            ka = request.surface_factor_selection.surface_factor
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     try:
         result = run_full_analysis(
@@ -123,15 +100,16 @@ async def analyze_fatigue(request: FatigueAnalysisRequest) -> dict:
             fatigue_ductility_coefficient=mat.fatigue_ductility_coefficient,
             fatigue_ductility_exponent=mat.fatigue_ductility_exponent,
             ka=ka,
-            kb=kb,
-            kc=kc,
-            kd=kd,
-            ke=ke,
+            kb=request.marin_factors.size_factor,
+            kc=request.marin_factors.load_factor,
+            kd=request.marin_factors.temperature_factor,
+            ke=request.marin_factors.reliability_factor,
             num_points=request.num_points,
             selected_mean_stress_model=request.selected_mean_stress_model.value,
+            sn_curve_source_mode=request.sn_curve_source.mode.value,
             sn_fit_points=(
-                [point.model_dump() for point in request.sn_fit_points]
-                if request.sn_fit_points
+                [point.model_dump() for point in request.sn_curve_source.points]
+                if request.sn_curve_source.points
                 else None
             ),
             notch=request.notch.model_dump() if request.notch else None,
@@ -141,10 +119,13 @@ async def analyze_fatigue(request: FatigueAnalysisRequest) -> dict:
                 else None
             ),
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
+        logger.exception("Unexpected fatigue analysis failure")
         raise HTTPException(
             status_code=500,
-            detail=f"Analysis failed: {exc}",
+            detail="Fatigue analysis failed due to an internal server error.",
         ) from exc
 
     return result

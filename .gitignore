@@ -1,1 +1,12 @@
 .claude/
+.next/
+frontend/build.log
+.env
+backend/.env
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.production.local
+backend/.venv/
+backend/**/__pycache__/
+frontend/**/__pycache__/
+*.pyc
