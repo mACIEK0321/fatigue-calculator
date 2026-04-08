@@ -31,11 +31,15 @@ export default function SNChart({ chartData, curveSource }: SNChartProps) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">S-N Curve</CardTitle>
+          <CardTitle>S-N curve</CardTitle>
+          <p className="text-sm leading-6 text-[#475569]">
+            The active curve and operating point will appear after a successful
+            analysis run.
+          </p>
         </CardHeader>
         <CardContent>
-          <div className="flex h-64 items-center justify-center text-slate-500">
-            Run an analysis to see the S-N curve.
+          <div className="flex h-[360px] items-center justify-center rounded-2xl border border-dashed border-[#cbd5e1] bg-[#f8fafc] px-6 text-center text-sm text-[#475569]">
+            No curve data available yet.
           </div>
         </CardContent>
       </Card>
@@ -55,131 +59,139 @@ export default function SNChart({ chartData, curveSource }: SNChartProps) {
 
   return (
     <Card>
-      <CardHeader className="space-y-2">
-        <CardTitle className="text-base">S-N Curve</CardTitle>
-        {curveSource && (
-          <p className="text-sm text-slate-400">
-            Active source:{" "}
-            <span className="text-slate-200">
-              {curveSource.mode === "points_fit" ? "S-N points + fit" : "Material Basquin"}
-            </span>
-            {curveSource.basquin_fit
-              ? `, fit R^2 = ${curveSource.basquin_fit.r_squared.toFixed(4)}`
-              : ""}
-          </p>
-        )}
+      <CardHeader>
+        <CardTitle>S-N curve</CardTitle>
+        <p className="text-sm leading-6 text-[#475569]">
+          {curveSource?.mode === "points_fit"
+            ? "Curve fitted from S-N points."
+            : "Curve generated from Basquin parameters."}
+          {curveSource?.basquin_fit
+            ? ` Fit quality R² = ${curveSource.basquin_fit.r_squared.toFixed(4)}.`
+            : ""}
+        </p>
       </CardHeader>
-      <CardContent className="space-y-3">
-        <ResponsiveContainer width="100%" height={340}>
-          <LineChart
-            data={chartData.curve}
-            margin={{ top: 10, right: 30, left: 20, bottom: 25 }}
-          >
-            <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-            <XAxis
-              dataKey="cycles"
-              type="number"
-              scale="log"
-              domain={[1, 1e9]}
-              tickFormatter={formatLogTick}
-              stroke="#94a3b8"
-              tick={{ fill: "#94a3b8", fontSize: 11 }}
-              label={{
-                value: "Cycles to failure (N)",
-                position: "insideBottom",
-                offset: -15,
-                fill: "#cbd5e1",
-                fontSize: 12,
-              }}
-            />
-            <YAxis
-              dataKey="stress"
-              type="number"
-              scale="log"
-              domain={["dataMin", "dataMax"]}
-              tickFormatter={(value: number) => value.toFixed(0)}
-              stroke="#94a3b8"
-              tick={{ fill: "#94a3b8", fontSize: 11 }}
-              label={{
-                value: "Stress amplitude (MPa)",
-                angle: -90,
-                position: "insideLeft",
-                offset: -5,
-                fill: "#cbd5e1",
-                fontSize: 12,
-              }}
-            />
-            <Tooltip
-              contentStyle={{
-                backgroundColor: "#0f172a",
-                border: "1px solid #334155",
-                borderRadius: "8px",
-                color: "#f8fafc",
-              }}
-              formatter={(value, name, item) => {
-                const numericValue = Number(value);
-                if (name === "stress") {
-                  return [`${numericValue.toFixed(1)} MPa`, "Stress amplitude"];
-                }
-                if (item?.payload?.label) {
-                  return [item.payload.label, "Selected life"];
-                }
-                return [formatLogTick(numericValue), "Cycles"];
-              }}
-              labelFormatter={(label) => `N = ${formatLogTick(Number(label))}`}
-            />
-            <ReferenceLine
-              y={chartData.endurance_limit}
-              stroke="#f59e0b"
-              strokeDasharray="4 4"
-              label={{
-                value: "Endurance limit",
-                fill: "#fcd34d",
-                position: "insideTopRight",
-              }}
-            />
-            <Line
-              type="monotone"
-              dataKey="stress"
-              stroke="#22d3ee"
-              strokeWidth={2}
-              dot={false}
-              name="Active S-N curve"
-            />
-            {selectedPoint.length > 0 && (
-              <Scatter
-                data={selectedPoint}
-                dataKey="stress"
-                fill={selectedPoint[0].status === "infinite" ? "#f59e0b" : "#ef4444"}
-                name={
-                  selectedPoint[0].status === "infinite"
-                    ? "Selected point (infinite life)"
-                    : "Selected point"
-                }
-              />
-            )}
-          </LineChart>
-        </ResponsiveContainer>
 
-        <div className="rounded-lg border border-slate-700 bg-slate-900/60 p-3 text-sm text-slate-400">
-          {chartData.selected_point ? (
-            chartData.selected_point.status === "infinite" ? (
-              <p>
-                The selected point is plotted on the endurance plateau because the corrected
-                alternating stress falls below the modified endurance limit.
-              </p>
-            ) : (
-              <p>
-                The selected point uses the mean-stress-corrected alternating stress and the
-                resulting finite life from the primary model.
-              </p>
-            )
-          ) : (
-            <p>
-              No selected point is shown because the chosen mean stress model exceeded its
-              valid limit.
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-1 gap-3 rounded-2xl border border-[#e2e8f0] bg-[#f8fafc] p-4 sm:grid-cols-3">
+          <div>
+            <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[#475569]">
+              Source
             </p>
-          )}
+            <p className="mt-1 font-semibold text-[#0f172a]">
+              {curveSource?.mode === "points_fit" ? "S-N points" : "Basquin"}
+            </p>
+          </div>
+          <div>
+            <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[#475569]">
+              Endurance limit Se
+            </p>
+            <p className="mt-1 font-semibold text-[#0f172a]">
+              {chartData.endurance_limit.toFixed(1)} MPa
+            </p>
+          </div>
+          <div>
+            <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[#475569]">
+              Selected point
+            </p>
+            <p className="mt-1 font-semibold text-[#0f172a]">
+              {chartData.selected_point
+                ? chartData.selected_point.status === "infinite"
+                  ? "Infinite life"
+                  : chartData.selected_point.label
+                : "Not available"}
+            </p>
+          </div>
+        </div>
+
+        <div className="overflow-hidden rounded-2xl border border-[#e2e8f0] bg-white p-4">
+          <ResponsiveContainer width="100%" height={340}>
+            <LineChart
+              data={chartData.curve}
+              margin={{ top: 12, right: 20, left: 8, bottom: 28 }}
+            >
+              <CartesianGrid strokeDasharray="4 4" stroke="#e2e8f0" />
+              <XAxis
+                dataKey="cycles"
+                type="number"
+                scale="log"
+                domain={[1, 1e9]}
+                tickFormatter={formatLogTick}
+                stroke="#64748b"
+                tick={{ fill: "#64748b", fontSize: 11 }}
+                label={{
+                  value: "Cycles N",
+                  position: "insideBottom",
+                  offset: -14,
+                  fill: "#475569",
+                  fontSize: 12,
+                }}
+              />
+              <YAxis
+                dataKey="stress"
+                type="number"
+                scale="log"
+                domain={["dataMin", "dataMax"]}
+                tickFormatter={(value: number) => value.toFixed(0)}
+                stroke="#64748b"
+                tick={{ fill: "#64748b", fontSize: 11 }}
+                label={{
+                  value: "Stress amplitude Sa (MPa)",
+                  angle: -90,
+                  position: "insideLeft",
+                  offset: -2,
+                  fill: "#475569",
+                  fontSize: 12,
+                }}
+              />
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: "#ffffff",
+                  border: "1px solid #cbd5e1",
+                  borderRadius: "16px",
+                  boxShadow: "0 10px 30px rgba(15, 23, 42, 0.10)",
+                }}
+                formatter={(value, name, item) => {
+                  const numericValue = Number(value);
+                  if (name === "stress") {
+                    return [`${numericValue.toFixed(1)} MPa`, "Stress amplitude"];
+                  }
+                  if (item?.payload?.label) {
+                    return [item.payload.label, "Selected point"];
+                  }
+                  return [formatLogTick(numericValue), "Cycles"];
+                }}
+                labelFormatter={(label) => `N = ${formatLogTick(Number(label))}`}
+              />
+              <ReferenceLine
+                y={chartData.endurance_limit}
+                stroke="#ea580c"
+                strokeDasharray="4 4"
+                label={{
+                  value: "Se",
+                  fill: "#ea580c",
+                  position: "insideTopRight",
+                }}
+              />
+              <Line
+                type="monotone"
+                dataKey="stress"
+                stroke="#2563eb"
+                strokeWidth={2.5}
+                dot={false}
+                name="Active S-N curve"
+              />
+              {selectedPoint.length > 0 ? (
+                <Scatter
+                  data={selectedPoint}
+                  dataKey="stress"
+                  fill={
+                    selectedPoint[0].status === "infinite" ? "#16a34a" : "#dc2626"
+                  }
+                  name="Selected point"
+                />
+              ) : null}
+            </LineChart>
+          </ResponsiveContainer>
         </div>
       </CardContent>
     </Card>

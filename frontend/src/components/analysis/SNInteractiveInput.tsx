@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useMemo, useRef, useState } from "react";
+import React, { useMemo, useRef } from "react";
+import { Plus, Trash2 } from "lucide-react";
 import {
   CartesianGrid,
   ComposedChart,
@@ -12,12 +13,10 @@ import {
   YAxis,
 } from "recharts";
 import type { TooltipProps, TooltipValueType } from "recharts";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Label } from "@/components/ui/label";
 import type { SNFitPoint } from "@/types/fatigue";
-import { Plus, Trash2 } from "lucide-react";
 
 interface BasquinFitDraft {
   sigma_f_prime: number;
@@ -31,7 +30,7 @@ interface SNInteractiveInputProps {
   onPointsChange: (points: SNFitPoint[]) => void;
 }
 
-const CHART_MARGINS = { top: 20, right: 24, left: 56, bottom: 32 };
+const CHART_MARGINS = { top: 20, right: 24, left: 40, bottom: 28 };
 const X_MIN = 1;
 const X_MAX = 1e9;
 
@@ -97,11 +96,30 @@ function fitBasquin(points: SNFitPoint[]): BasquinFitDraft | null {
   };
 }
 
+function FieldHeader({
+  label,
+  unit,
+}: {
+  label: string;
+  unit: string;
+}) {
+  return (
+    <div className="hidden grid-cols-[1.15fr_1fr_48px] gap-3 rounded-2xl bg-[#f8fafc] px-4 py-3 md:grid">
+      <div>
+        <Label className="text-[11px] tracking-[0.1em]">{label}</Label>
+      </div>
+      <div>
+        <Label className="text-[11px] tracking-[0.1em]">{unit}</Label>
+      </div>
+      <div />
+    </div>
+  );
+}
+
 export default function SNInteractiveInput({
   points,
   onPointsChange,
 }: SNInteractiveInputProps) {
-  const [activeMode, setActiveMode] = useState("table");
   const wrapperRef = useRef<HTMLDivElement | null>(null);
 
   const sanitizedPoints = useMemo(
@@ -125,6 +143,7 @@ export default function SNInteractiveInput({
         curve.push({ cycles, stress });
       }
     }
+
     return curve;
   }, [fit]);
 
@@ -139,7 +158,7 @@ export default function SNInteractiveInput({
   }, [fitCurve, sanitizedPoints]);
 
   const updatePoint = (index: number, field: keyof SNFitPoint, value: string) => {
-    const parsed = parseFloat(value);
+    const parsed = Number(value);
     onPointsChange(
       points.map((point, pointIndex) =>
         pointIndex === index
@@ -197,159 +216,173 @@ export default function SNInteractiveInput({
   };
 
   return (
-    <Card className="border-slate-700 bg-slate-900/70">
-      <CardHeader>
-        <CardTitle className="text-base text-slate-100">
-          S-N Points and Basquin Fit
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <Tabs value={activeMode} onValueChange={setActiveMode}>
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="table">Manual Table</TabsTrigger>
-            <TabsTrigger value="canvas">Canvas Interaction</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="table" className="space-y-3 pt-3">
-            <Button type="button" variant="outline" className="w-full" onClick={addPoint}>
-              <Plus className="mr-2 h-4 w-4" /> Add S-N Point
-            </Button>
-            <div className="space-y-2">
-              {points.length === 0 ? (
-                <p className="rounded-md border border-slate-700 bg-slate-950/70 p-3 text-sm text-slate-400">
-                  Add at least two points to fit Basquin parameters.
-                </p>
-              ) : (
-                points.map((point, index) => (
-                  <div
-                    key={`${point.cycles}-${point.stress}-${index}`}
-                    className="grid grid-cols-12 gap-2"
-                  >
-                    <Input
-                      className="col-span-5"
-                      type="number"
-                      step="any"
-                      value={point.cycles}
-                      onChange={(event) =>
-                        updatePoint(index, "cycles", event.target.value)
-                      }
-                      placeholder="Cycles N"
-                    />
-                    <Input
-                      className="col-span-5"
-                      type="number"
-                      step="any"
-                      value={point.stress}
-                      onChange={(event) =>
-                        updatePoint(index, "stress", event.target.value)
-                      }
-                      placeholder="Stress amplitude MPa"
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      className="col-span-2"
-                      onClick={() => removePoint(index)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                ))
-              )}
-            </div>
-          </TabsContent>
-
-          <TabsContent value="canvas" className="space-y-3 pt-3">
-            <p className="text-sm text-slate-400">
-              Click inside the log-log chart to add S-N points between 10^0 and
-              10^9 cycles.
-            </p>
-            <div
-              ref={wrapperRef}
-              className="h-[320px] w-full cursor-crosshair"
-              onClick={handleChartClick}
-            >
-              <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart margin={CHART_MARGINS}>
-                  <CartesianGrid stroke="#334155" strokeDasharray="3 3" />
-                  <XAxis
-                    type="number"
-                    dataKey="cycles"
-                    scale="log"
-                    domain={[X_MIN, X_MAX]}
-                    tickFormatter={formatLogTick}
-                    stroke="#94a3b8"
-                    tick={{ fill: "#94a3b8", fontSize: 11 }}
-                    label={{
-                      value: "Cycles (N)",
-                      position: "insideBottom",
-                      offset: -16,
-                      fill: "#cbd5e1",
-                    }}
-                  />
-                  <YAxis
-                    type="number"
-                    dataKey="stress"
-                    scale="log"
-                    domain={yDomain}
-                    stroke="#94a3b8"
-                    tick={{ fill: "#94a3b8", fontSize: 11 }}
-                    label={{
-                      value: "Stress amplitude (MPa)",
-                      angle: -90,
-                      position: "insideLeft",
-                      fill: "#cbd5e1",
-                    }}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: "#0f172a",
-                      border: "1px solid #334155",
-                      color: "#e2e8f0",
-                    }}
-                    formatter={tooltipFormatter}
-                  />
-                  <Scatter
-                    data={sanitizedPoints}
-                    dataKey="stress"
-                    fill="#22d3ee"
-                    name="Input points"
-                  />
-                  <Line
-                    type="monotone"
-                    data={fitCurve}
-                    dataKey="stress"
-                    stroke="#38bdf8"
-                    strokeWidth={2}
-                    dot={false}
-                    name="Fitted curve"
-                  />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </div>
-          </TabsContent>
-        </Tabs>
-
-        <div className="rounded-md border border-slate-700 bg-slate-950/70 p-3 text-sm text-slate-300">
-          {fit ? (
-            <div className="space-y-1">
-              <p>
-                Fit: S = {fit.a.toExponential(3)} * N^{fit.b.toFixed(4)}
-              </p>
-              <p>
-                Basquin: sigma_f&apos; = {fit.sigma_f_prime.toFixed(2)} MPa, b ={" "}
-                {fit.b.toFixed(4)}
-              </p>
-              <p>R^2 = {fit.rSquared.toFixed(4)}</p>
-            </div>
-          ) : (
-            <p>
-              Need at least two valid points with positive cycles and stress to
-              compute a fit.
-            </p>
-          )}
+    <div className="space-y-4 rounded-2xl border border-[#e2e8f0] bg-[#f8fafc] p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-semibold text-[#0f172a]">S-N points</p>
+          <p className="text-sm text-[#475569]">
+            Enter at least two points. Click the chart to add new points on the
+            log-log grid.
+          </p>
         </div>
-      </CardContent>
-    </Card>
+        <Button type="button" variant="outline" onClick={addPoint}>
+          <Plus className="mr-2 h-4 w-4" />
+          Add point
+        </Button>
+      </div>
+
+      <FieldHeader label="Cycles N" unit="Stress amplitude Sa (MPa)" />
+
+      <div className="space-y-3">
+        {points.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-[#cbd5e1] bg-white px-4 py-5 text-sm text-[#475569]">
+            Add two or more S-N points to calculate a Basquin fit.
+          </div>
+        ) : (
+          points.map((point, index) => (
+            <div
+              key={`${point.cycles}-${point.stress}-${index}`}
+              className="grid grid-cols-1 gap-3 rounded-2xl border border-[#e2e8f0] bg-white p-3 md:grid-cols-[1.15fr_1fr_48px]"
+            >
+              <div className="space-y-1.5">
+                <Label className="md:hidden">Cycles N</Label>
+                <Input
+                  type="number"
+                  step="any"
+                  value={point.cycles}
+                  placeholder="e.g. 1e6"
+                  onChange={(event) =>
+                    updatePoint(index, "cycles", event.target.value)
+                  }
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="md:hidden">Stress amplitude Sa (MPa)</Label>
+                <Input
+                  type="number"
+                  step="any"
+                  value={point.stress}
+                  placeholder="e.g. 240"
+                  onChange={(event) =>
+                    updatePoint(index, "stress", event.target.value)
+                  }
+                />
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="self-end md:self-center"
+                onClick={() => removePoint(index)}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div className="grid gap-3 rounded-2xl border border-[#dbeafe] bg-[#eff6ff] p-4 sm:grid-cols-3">
+        <div>
+          <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[#475569]">
+            Valid points
+          </p>
+          <p className="mt-1 text-lg font-semibold text-[#0f172a]">
+            {sanitizedPoints.length}
+          </p>
+        </div>
+        <div>
+          <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[#475569]">
+            σf&apos;
+          </p>
+          <p className="mt-1 text-lg font-semibold text-[#0f172a]">
+            {fit ? `${fit.sigma_f_prime.toFixed(1)} MPa` : "Pending"}
+          </p>
+        </div>
+        <div>
+          <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[#475569]">
+            b exponent
+          </p>
+          <p className="mt-1 text-lg font-semibold text-[#0f172a]">
+            {fit ? fit.b.toFixed(4) : "Pending"}
+          </p>
+        </div>
+      </div>
+
+      <div className="overflow-hidden rounded-2xl border border-[#e2e8f0] bg-white p-4">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <p className="text-sm font-semibold text-[#0f172a]">
+            S-N fit preview
+          </p>
+          <p className="text-sm text-[#475569]">
+            {fit ? `R² = ${fit.rSquared.toFixed(4)}` : "Awaiting valid points"}
+          </p>
+        </div>
+        <div
+          ref={wrapperRef}
+          className="h-[300px] w-full cursor-crosshair"
+          onClick={handleChartClick}
+        >
+          <ResponsiveContainer width="100%" height="100%">
+            <ComposedChart margin={CHART_MARGINS}>
+              <CartesianGrid stroke="#e2e8f0" strokeDasharray="4 4" />
+              <XAxis
+                type="number"
+                dataKey="cycles"
+                scale="log"
+                domain={[X_MIN, X_MAX]}
+                tickFormatter={formatLogTick}
+                stroke="#64748b"
+                tick={{ fill: "#64748b", fontSize: 11 }}
+                label={{
+                  value: "Cycles N",
+                  position: "insideBottom",
+                  offset: -14,
+                  fill: "#475569",
+                }}
+              />
+              <YAxis
+                type="number"
+                dataKey="stress"
+                scale="log"
+                domain={yDomain}
+                stroke="#64748b"
+                tick={{ fill: "#64748b", fontSize: 11 }}
+                label={{
+                  value: "Stress amplitude Sa (MPa)",
+                  angle: -90,
+                  position: "insideLeft",
+                  fill: "#475569",
+                }}
+              />
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: "#ffffff",
+                  border: "1px solid #cbd5e1",
+                  borderRadius: "16px",
+                  boxShadow: "0 10px 30px rgba(15, 23, 42, 0.10)",
+                }}
+                formatter={tooltipFormatter}
+              />
+              <Scatter
+                data={sanitizedPoints}
+                dataKey="stress"
+                fill="#2563eb"
+                name="Input points"
+              />
+              <Line
+                type="monotone"
+                data={fitCurve}
+                dataKey="stress"
+                stroke="#16a34a"
+                strokeWidth={2}
+                dot={false}
+                name="Fitted curve"
+              />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    </div>
   );
 }

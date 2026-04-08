@@ -20,16 +20,16 @@ function Slider({
     >
       <SliderPrimitive.Track
         data-slot="slider-track"
-        className="relative h-1.5 w-full grow overflow-hidden rounded-full bg-slate-700"
+        className="relative h-1.5 w-full grow overflow-hidden rounded-full bg-[#e2e8f0]"
       >
         <SliderPrimitive.Range
           data-slot="slider-range"
-          className="absolute h-full bg-cyan-500"
+          className="absolute h-full bg-[#2563eb]"
         />
       </SliderPrimitive.Track>
       <SliderPrimitive.Thumb
         data-slot="slider-thumb"
-        className="block h-4 w-4 rounded-full border border-cyan-300 bg-slate-100 shadow transition-colors focus-visible:outline-none"
+        className="block h-4 w-4 rounded-full border border-[#2563eb] bg-white shadow transition-colors focus-visible:outline-none"
       />
     </SliderPrimitive.Root>
   );

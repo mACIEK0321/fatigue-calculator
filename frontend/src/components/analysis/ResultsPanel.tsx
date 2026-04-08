@@ -27,20 +27,41 @@ function formatLife(life: FatigueLifeResult): string {
   return `${formatCycles(life.cycles)} cycles`;
 }
 
+function formatStress(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "N/A";
+  }
+
+  return `${value.toFixed(1)} MPa`;
+}
+
 function formatEquivalentStress(result: MeanStressCorrectionResult): string {
   if (result.equivalent_alternating_stress === null) return "N/A";
   return `${result.equivalent_alternating_stress.toFixed(1)} MPa`;
 }
 
+function getStatusLabel(
+  selectedLife: FatigueLifeResult,
+  isSafe: boolean
+): string {
+  if (selectedLife.status === "infinite") {
+    return "Infinite life";
+  }
+
+  return isSafe ? "Safe" : "Unsafe";
+}
+
 export default function ResultsPanel({ results }: ResultsPanelProps) {
   if (!results) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Analysis Results</CardTitle>
+      <Card className="border-slate-200 bg-white shadow-sm">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base text-slate-900">
+            Analysis Results
+          </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex h-32 items-center justify-center text-slate-500">
+          <div className="flex h-32 items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50 text-sm text-slate-500">
             Run an analysis to see results.
           </div>
         </CardContent>
@@ -53,137 +74,155 @@ export default function ResultsPanel({ results }: ResultsPanelProps) {
   const isSafe = selectedResult.is_safe;
   const stressState = results.stress_state;
   const curveSource = results.sn_curve_source;
+  const statusLabel = getStatusLabel(selectedLife, isSafe);
+  const StatusIcon =
+    selectedLife.status === "infinite" || isSafe ? ShieldCheck : ShieldAlert;
 
   return (
     <div className="space-y-4">
       <Card
         className={
           isSafe
-            ? "border-green-700 bg-green-950/40"
-            : "border-red-700 bg-red-950/40"
+            ? "border-green-200 bg-green-50 shadow-sm"
+            : selectedLife.status === "infinite"
+              ? "border-amber-200 bg-amber-50 shadow-sm"
+              : "border-red-200 bg-red-50 shadow-sm"
         }
       >
-        <CardContent className="flex items-start gap-3 p-4">
-          {isSafe ? (
-            <ShieldCheck className="mt-0.5 h-8 w-8 text-green-400" />
-          ) : (
-            <ShieldAlert className="mt-0.5 h-8 w-8 text-red-400" />
-          )}
-          <div className="space-y-1">
-            <p
-              className={`text-xl font-bold ${
-                isSafe ? "text-green-300" : "text-red-300"
+        <CardContent className="flex flex-col gap-4 p-5">
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-1">
+              <p className="text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
+                Result status
+              </p>
+              <p
+                className={`text-2xl font-semibold ${
+                  selectedLife.status === "infinite"
+                    ? "text-amber-700"
+                    : isSafe
+                      ? "text-green-700"
+                      : "text-red-700"
+                }`}
+              >
+                {statusLabel}
+              </p>
+              <p className="text-sm text-slate-600">
+                Primary model: {selectedResult.model_name}
+              </p>
+            </div>
+            <div
+              className={`rounded-full px-3 py-1 text-xs font-medium ${
+                selectedLife.status === "infinite"
+                  ? "bg-amber-100 text-amber-700"
+                  : isSafe
+                    ? "bg-green-100 text-green-700"
+                    : "bg-red-100 text-red-700"
               }`}
             >
-              {isSafe ? "SAFE" : "UNSAFE"}
-            </p>
-            <p className="text-sm text-slate-200">
-              Primary result from {selectedResult.model_name}
-            </p>
-            <p className="text-sm text-slate-400">{selectedLife.reason}</p>
+              <StatusIcon className="mr-1 inline-block h-3.5 w-3.5" />
+              {statusLabel}
+            </div>
           </div>
-        </CardContent>
-      </Card>
 
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">Primary Result</CardTitle>
-        </CardHeader>
-        <CardContent className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          <div className="rounded-lg border border-slate-700 bg-slate-900 p-4">
-            <p className="text-xs text-slate-400">Selected Life</p>
-            <p className="mt-2 text-xl font-semibold text-cyan-300">
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
+              Cycles to failure
+            </p>
+            <p className="mt-2 text-4xl font-semibold tracking-tight text-slate-900">
               {formatLife(selectedLife)}
             </p>
-            <p className="mt-2 text-xs text-slate-500">
-              Model: {results.selected_mean_stress_model}
-            </p>
+            <p className="mt-2 text-sm text-slate-600">{selectedLife.reason}</p>
           </div>
-          <div className="rounded-lg border border-slate-700 bg-slate-900 p-4">
-            <p className="text-xs text-slate-400">Safety Factor</p>
-            <p
-              className={`mt-2 text-xl font-semibold ${
-                isSafe ? "text-green-300" : "text-red-300"
-              }`}
-            >
-              {selectedResult.safety_factor.toFixed(3)}
-            </p>
-            <p className="mt-2 text-xs text-slate-500">
-              Equivalent alternating stress: {formatEquivalentStress(selectedResult)}
-            </p>
-          </div>
-          <div className="rounded-lg border border-slate-700 bg-slate-900 p-4">
-            <p className="text-xs text-slate-400">S-N Source</p>
-            <p className="mt-2 text-lg font-semibold text-cyan-300">
-              {curveSource.mode === "points_fit" ? "Points + fit" : "Material Basquin"}
-            </p>
-            <p className="mt-2 text-xs text-slate-500">
-              sigma_f&apos; = {curveSource.basquin_parameters.sigma_f_prime.toFixed(1)} MPa,
-              b = {curveSource.basquin_parameters.b.toFixed(4)}
-            </p>
+
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+            <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+              <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-slate-500">
+                Safety factor
+              </p>
+              <p className="mt-2 text-2xl font-semibold text-slate-900">
+                {selectedResult.safety_factor.toFixed(3)}
+              </p>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+              <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-slate-500">
+                Model used
+              </p>
+              <p className="mt-2 text-sm font-semibold text-slate-900">
+                {selectedResult.model_name}
+              </p>
+              <p className="mt-1 text-xs text-slate-500">
+                {results.selected_mean_stress_model}
+              </p>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+              <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-slate-500">
+                Sa
+              </p>
+              <p className="mt-2 text-2xl font-semibold text-slate-900">
+                {formatStress(stressState.stress_amplitude)}
+              </p>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+              <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-slate-500">
+                Sm
+              </p>
+              <p className="mt-2 text-2xl font-semibold text-slate-900">
+                {formatStress(stressState.mean_stress)}
+              </p>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+              <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-slate-500">
+                Se
+              </p>
+              <p className="mt-2 text-2xl font-semibold text-slate-900">
+                {results.modified_endurance_limit.toFixed(1)} MPa
+              </p>
+            </div>
           </div>
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="border-slate-200 bg-white shadow-sm">
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">Stress State</CardTitle>
-        </CardHeader>
-        <CardContent className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          <div className="rounded-lg bg-slate-800 p-3 text-center">
-            <p className="text-xs text-slate-400">Input Max</p>
-            <p className="mt-1 font-semibold text-slate-100">
-              {stressState.input_max_stress.toFixed(1)} MPa
-            </p>
-          </div>
-          <div className="rounded-lg bg-slate-800 p-3 text-center">
-            <p className="text-xs text-slate-400">Input Min</p>
-            <p className="mt-1 font-semibold text-slate-100">
-              {stressState.input_min_stress.toFixed(1)} MPa
-            </p>
-          </div>
-          <div className="rounded-lg bg-slate-800 p-3 text-center">
-            <p className="text-xs text-slate-400">Corrected Sa</p>
-            <p className="mt-1 font-semibold text-cyan-300">
-              {stressState.stress_amplitude.toFixed(1)} MPa
-            </p>
-          </div>
-          <div className="rounded-lg bg-slate-800 p-3 text-center">
-            <p className="text-xs text-slate-400">Corrected Sm</p>
-            <p className="mt-1 font-semibold text-cyan-300">
-              {stressState.mean_stress.toFixed(1)} MPa
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Model Comparison</CardTitle>
+          <CardTitle className="text-base text-slate-900">
+            Mean stress comparison
+          </CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
           {results.mean_stress_corrections.map((correction) => (
             <div
               key={correction.model_name}
-              className="grid grid-cols-1 gap-2 rounded-lg bg-slate-800 px-3 py-3 md:grid-cols-4"
+              className="grid grid-cols-1 gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 md:grid-cols-4"
             >
               <div>
-                <p className="text-xs text-slate-400">Model</p>
-                <p className="font-medium text-slate-100">{correction.model_name}</p>
+                <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-slate-500">
+                  Model
+                </p>
+                <p className="font-medium text-slate-900">
+                  {correction.model_name}
+                </p>
               </div>
               <div>
-                <p className="text-xs text-slate-400">Life</p>
-                <p className="font-medium text-slate-100">{formatLife(correction.life)}</p>
+                <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-slate-500">
+                  Life
+                </p>
+                <p className="font-medium text-slate-900">
+                  {formatLife(correction.life)}
+                </p>
               </div>
               <div>
-                <p className="text-xs text-slate-400">Safety Factor</p>
-                <p className="font-medium text-slate-100">
+                <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-slate-500">
+                  Safety factor
+                </p>
+                <p className="font-medium text-slate-900">
                   {correction.safety_factor.toFixed(3)}
                 </p>
               </div>
               <div>
-                <p className="text-xs text-slate-400">Corrected Sa</p>
-                <p className="font-medium text-slate-100">
+                <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-slate-500">
+                  Corrected Sa
+                </p>
+                <p className="font-medium text-slate-900">
                   {formatEquivalentStress(correction)}
                 </p>
               </div>
@@ -192,91 +231,124 @@ export default function ResultsPanel({ results }: ResultsPanelProps) {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="border-slate-200 bg-white shadow-sm">
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">Endurance Limit and Active Curve</CardTitle>
+          <CardTitle className="text-base text-slate-900">S-N model</CardTitle>
         </CardHeader>
         <CardContent className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <div className="rounded-lg bg-slate-800 p-3">
-            <p className="text-xs text-slate-400">Modified Endurance Limit</p>
-            <p className="mt-1 text-lg font-semibold text-amber-300">
-              {results.modified_endurance_limit.toFixed(1)} MPa
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-slate-500">
+              Source
+            </p>
+            <p className="mt-2 text-sm font-semibold text-slate-900">
+              {curveSource.mode === "points_fit"
+                ? "S-N points + fit"
+                : "Basquin parameters"}
+            </p>
+            <p className="mt-1 text-sm text-slate-600">
+              σf&apos; = {curveSource.basquin_parameters.sigma_f_prime.toFixed(1)} MPa, b ={" "}
+              {curveSource.basquin_parameters.b.toFixed(4)}
             </p>
           </div>
-          <div className="rounded-lg bg-slate-800 p-3">
-            <p className="text-xs text-slate-400">Basquin Parameter Source</p>
-            <p className="mt-1 text-lg font-semibold text-slate-100">
-              {curveSource.basquin_parameters.source}
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-slate-500">
+              Modified Se
+            </p>
+            <p className="mt-2 text-sm font-semibold text-slate-900">
+              {results.modified_endurance_limit.toFixed(1)} MPa
+            </p>
+            <p className="mt-1 text-sm text-slate-600">
+              Basquin source: {curveSource.basquin_parameters.source}
             </p>
           </div>
         </CardContent>
       </Card>
 
-      {results.notch_result && (
-        <Card>
+      {results.notch_result ? (
+        <Card className="border-slate-200 bg-white shadow-sm">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Notch Correction</CardTitle>
+            <CardTitle className="text-base text-slate-900">
+              Notch correction
+            </CardTitle>
           </CardHeader>
           <CardContent className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <div className="rounded-lg bg-slate-800 p-3 text-center">
-              <p className="text-xs text-slate-400">Model</p>
-              <p className="mt-1 font-semibold text-slate-100">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-center">
+              <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-slate-500">
+                Model
+              </p>
+              <p className="mt-1 font-semibold text-slate-900">
                 {results.notch_result.model}
               </p>
             </div>
-            <div className="rounded-lg bg-slate-800 p-3 text-center">
-              <p className="text-xs text-slate-400">Kt</p>
-              <p className="mt-1 font-semibold text-slate-100">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-center">
+              <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-slate-500">
+                Kt
+              </p>
+              <p className="mt-1 font-semibold text-slate-900">
                 {results.notch_result.kt.toFixed(3)}
               </p>
             </div>
-            <div className="rounded-lg bg-slate-800 p-3 text-center">
-              <p className="text-xs text-slate-400">q</p>
-              <p className="mt-1 font-semibold text-slate-100">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-center">
+              <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-slate-500">
+                q
+              </p>
+              <p className="mt-1 font-semibold text-slate-900">
                 {results.notch_result.q.toFixed(3)}
               </p>
             </div>
-            <div className="rounded-lg bg-slate-800 p-3 text-center">
-              <p className="text-xs text-slate-400">Kf</p>
-              <p className="mt-1 font-semibold text-cyan-300">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-center">
+              <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-slate-500">
+                Kf
+              </p>
+              <p className="mt-1 font-semibold text-slate-900">
                 {results.notch_result.kf.toFixed(3)}
               </p>
             </div>
           </CardContent>
         </Card>
-      )}
+      ) : null}
 
-      {results.miner_damage && (
-        <Card>
+      {results.miner_damage ? (
+        <Card className="border-slate-200 bg-white shadow-sm">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Palmgren-Miner Damage</CardTitle>
+            <CardTitle className="text-base text-slate-900">
+              Palmgren-Miner damage
+            </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-              <div className="rounded-lg bg-slate-800 p-3">
-                <p className="text-xs text-slate-400">Total Damage</p>
-                <p className="mt-1 text-lg font-semibold text-slate-100">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-slate-500">
+                  Total damage
+                </p>
+                <p className="mt-1 text-lg font-semibold text-slate-900">
                   {results.miner_damage.total_damage === null
                     ? "Immediate failure"
                     : results.miner_damage.total_damage.toFixed(4)}
                 </p>
               </div>
-              <div className="rounded-lg bg-slate-800 p-3">
-                <p className="text-xs text-slate-400">Sequence Life</p>
-                <p className="mt-1 text-lg font-semibold text-cyan-300">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-slate-500">
+                  Sequence life
+                </p>
+                <p className="mt-1 text-lg font-semibold text-slate-900">
                   {formatLife(results.miner_damage.sequence_life)}
                 </p>
               </div>
-              <div className="rounded-lg bg-slate-800 p-3">
-                <p className="text-xs text-slate-400">Failure Status</p>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-slate-500">
+                  Failure status
+                </p>
                 <p
                   className={`mt-1 text-lg font-semibold ${
                     results.miner_damage.is_failure
-                      ? "text-red-300"
-                      : "text-green-300"
+                      ? "text-red-700"
+                      : "text-green-700"
                   }`}
                 >
-                  {results.miner_damage.is_failure ? "Sequence fails" : "Sequence survives"}
+                  {results.miner_damage.is_failure
+                    ? "Sequence fails"
+                    : "Sequence survives"}
                 </p>
               </div>
             </div>
@@ -284,31 +356,45 @@ export default function ResultsPanel({ results }: ResultsPanelProps) {
               {results.miner_damage.block_results.map((block) => (
                 <div
                   key={block.block_index}
-                  className="grid grid-cols-1 gap-2 rounded-lg bg-slate-800 px-3 py-3 md:grid-cols-5"
+                  className="grid grid-cols-1 gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 md:grid-cols-5"
                 >
                   <div>
-                    <p className="text-xs text-slate-400">Block</p>
-                    <p className="font-medium text-slate-100">{block.block_index + 1}</p>
+                    <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-slate-500">
+                      Block
+                    </p>
+                    <p className="font-medium text-slate-900">
+                      {block.block_index + 1}
+                    </p>
                   </div>
                   <div>
-                    <p className="text-xs text-slate-400">Life</p>
-                    <p className="font-medium text-slate-100">{formatLife(block.life)}</p>
+                    <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-slate-500">
+                      Life
+                    </p>
+                    <p className="font-medium text-slate-900">
+                      {formatLife(block.life)}
+                    </p>
                   </div>
                   <div>
-                    <p className="text-xs text-slate-400">Applied Cycles</p>
-                    <p className="font-medium text-slate-100">
+                    <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-slate-500">
+                      Applied cycles
+                    </p>
+                    <p className="font-medium text-slate-900">
                       {formatCycles(block.applied_cycles)}
                     </p>
                   </div>
                   <div>
-                    <p className="text-xs text-slate-400">Damage</p>
-                    <p className="font-medium text-slate-100">
+                    <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-slate-500">
+                      Damage
+                    </p>
+                    <p className="font-medium text-slate-900">
                       {block.damage === null ? "N/A" : block.damage.toFixed(4)}
                     </p>
                   </div>
                   <div>
-                    <p className="text-xs text-slate-400">Corrected Sa</p>
-                    <p className="font-medium text-slate-100">
+                    <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-slate-500">
+                      Corrected Sa
+                    </p>
+                    <p className="font-medium text-slate-900">
                       {block.equivalent_alternating_stress === null
                         ? "N/A"
                         : `${block.equivalent_alternating_stress.toFixed(1)} MPa`}
@@ -319,7 +405,7 @@ export default function ResultsPanel({ results }: ResultsPanelProps) {
             </div>
           </CardContent>
         </Card>
-      )}
+      ) : null}
     </div>
   );
 }

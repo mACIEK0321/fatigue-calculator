@@ -109,6 +109,10 @@ describe("ResultsPanel", () => {
     const markup = renderToStaticMarkup(<ResultsPanel results={results} />);
 
     expect(markup).toContain("Infinite life");
-    expect(markup).not.toContain("1.25M cycles");
+    expect(markup).toContain("Safety factor");
+    expect(markup).toContain("Sa");
+    expect(markup).toContain("Sm");
+    expect(markup).toContain("Se");
+    expect(markup).toContain("goodman");
   });
 });

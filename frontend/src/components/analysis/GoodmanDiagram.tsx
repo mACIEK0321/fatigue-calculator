@@ -32,11 +32,15 @@ export default function GoodmanDiagram({
     return (
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Haigh Diagram</CardTitle>
+          <CardTitle>Haigh diagram</CardTitle>
+          <p className="text-sm leading-6 text-[#475569]">
+            Mean stress envelopes and the operating point will appear after a
+            successful analysis run.
+          </p>
         </CardHeader>
         <CardContent>
-          <div className="flex h-64 items-center justify-center text-slate-500">
-            Run an analysis to see the Haigh diagram.
+          <div className="flex h-[360px] items-center justify-center rounded-2xl border border-dashed border-[#cbd5e1] bg-[#f8fafc] px-6 text-center text-sm text-[#475569]">
+            No Haigh diagram data available yet.
           </div>
         </CardContent>
       </Card>
@@ -69,125 +73,139 @@ export default function GoodmanDiagram({
 
   return (
     <Card>
-      <CardHeader className="space-y-2">
-        <CardTitle className="text-base">Haigh Diagram</CardTitle>
-        <p className="text-sm text-slate-400">
-          The raw operating point is plotted together with the corrected point
-          used by the selected mean stress model
+      <CardHeader>
+        <CardTitle>Haigh diagram</CardTitle>
+        <p className="text-sm leading-6 text-[#475569]">
+          Operating point and corrected point for the selected model
           {selectedModel ? ` (${labelForModel(selectedModel)})` : ""}.
         </p>
       </CardHeader>
-      <CardContent className="space-y-3">
-        <ResponsiveContainer width="100%" height={340}>
-          <ComposedChart
-            data={envelopeData}
-            margin={{ top: 10, right: 30, left: 20, bottom: 25 }}
-          >
-            <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-            <XAxis
-              dataKey="mean_stress"
-              type="number"
-              stroke="#94a3b8"
-              tick={{ fill: "#94a3b8", fontSize: 11 }}
-              label={{
-                value: "Mean stress (MPa)",
-                position: "insideBottom",
-                offset: -15,
-                fill: "#cbd5e1",
-                fontSize: 12,
-              }}
-            />
-            <YAxis
-              type="number"
-              stroke="#94a3b8"
-              tick={{ fill: "#94a3b8", fontSize: 11 }}
-              label={{
-                value: "Stress amplitude (MPa)",
-                angle: -90,
-                position: "insideLeft",
-                offset: -5,
-                fill: "#cbd5e1",
-                fontSize: 12,
-              }}
-            />
-            <Tooltip
-              contentStyle={{
-                backgroundColor: "#0f172a",
-                border: "1px solid #334155",
-                borderRadius: "8px",
-                color: "#f8fafc",
-              }}
-              formatter={(value, name) => [
-                `${Number(value).toFixed(1)} MPa`,
-                String(name),
-              ]}
-              labelFormatter={(label) =>
-                `Mean stress: ${Number(label).toFixed(1)} MPa`
-              }
-            />
-            <Legend wrapperStyle={{ color: "#cbd5e1", fontSize: 12 }} />
-            <Line
-              type="monotone"
-              dataKey="goodman"
-              stroke="#3b82f6"
-              strokeWidth={2}
-              dot={false}
-              name="Goodman"
-            />
-            <Line
-              type="monotone"
-              dataKey="gerber"
-              stroke="#22c55e"
-              strokeWidth={2}
-              dot={false}
-              name="Gerber"
-            />
-            <Line
-              type="monotone"
-              dataKey="soderberg"
-              stroke="#f97316"
-              strokeWidth={2}
-              dot={false}
-              name="Soderberg"
-            />
-            <Line
-              type="monotone"
-              dataKey="morrow"
-              stroke="#a855f7"
-              strokeWidth={2}
-              dot={false}
-              name="Morrow"
-            />
-            <Scatter
-              data={operatingPointData}
-              dataKey="stress_amplitude"
-              fill="#ef4444"
-              name="Operating point"
-            />
-            {correctedPointData.length > 0 ? (
-              <Scatter
-                data={correctedPointData}
-                dataKey="stress_amplitude"
-                fill="#f59e0b"
-                name="Corrected point"
-              />
-            ) : null}
-          </ComposedChart>
-        </ResponsiveContainer>
 
-        <div className="rounded-lg border border-slate-700 bg-slate-900/60 p-3 text-sm text-slate-400">
-          {diagram.corrected_operating_point ? (
-            <p>
-              The corrected point is the fully reversed equivalent point used by
-              the selected mean stress correction to compute the primary life
-              result.
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-1 gap-3 rounded-2xl border border-[#e2e8f0] bg-[#f8fafc] p-4 sm:grid-cols-3">
+          <div>
+            <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[#475569]">
+              Operating Sa
             </p>
-          ) : (
-            <p>
-              No corrected point is shown because the selected mean stress model
-              exceeded its valid stress limit.
+            <p className="mt-1 font-semibold text-[#0f172a]">
+              {diagram.operating_point.stress_amplitude.toFixed(1)} MPa
             </p>
-          )}
+          </div>
+          <div>
+            <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[#475569]">
+              Operating Sm
+            </p>
+            <p className="mt-1 font-semibold text-[#0f172a]">
+              {diagram.operating_point.mean_stress.toFixed(1)} MPa
+            </p>
+          </div>
+          <div>
+            <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[#475569]">
+              Corrected point
+            </p>
+            <p className="mt-1 font-semibold text-[#0f172a]">
+              {diagram.corrected_operating_point ? "Available" : "Not available"}
+            </p>
+          </div>
+        </div>
+
+        <div className="overflow-hidden rounded-2xl border border-[#e2e8f0] bg-white p-4">
+          <ResponsiveContainer width="100%" height={340}>
+            <ComposedChart
+              data={envelopeData}
+              margin={{ top: 12, right: 20, left: 8, bottom: 28 }}
+            >
+              <CartesianGrid strokeDasharray="4 4" stroke="#e2e8f0" />
+              <XAxis
+                dataKey="mean_stress"
+                type="number"
+                stroke="#64748b"
+                tick={{ fill: "#64748b", fontSize: 11 }}
+                label={{
+                  value: "Mean stress Sm (MPa)",
+                  position: "insideBottom",
+                  offset: -14,
+                  fill: "#475569",
+                  fontSize: 12,
+                }}
+              />
+              <YAxis
+                type="number"
+                stroke="#64748b"
+                tick={{ fill: "#64748b", fontSize: 11 }}
+                label={{
+                  value: "Stress amplitude Sa (MPa)",
+                  angle: -90,
+                  position: "insideLeft",
+                  offset: -2,
+                  fill: "#475569",
+                  fontSize: 12,
+                }}
+              />
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: "#ffffff",
+                  border: "1px solid #cbd5e1",
+                  borderRadius: "16px",
+                  boxShadow: "0 10px 30px rgba(15, 23, 42, 0.10)",
+                }}
+                formatter={(value, name) => [
+                  `${Number(value).toFixed(1)} MPa`,
+                  String(name),
+                ]}
+                labelFormatter={(label) =>
+                  `Mean stress: ${Number(label).toFixed(1)} MPa`
+                }
+              />
+              <Legend wrapperStyle={{ color: "#475569", fontSize: 12 }} />
+              <Line
+                type="monotone"
+                dataKey="goodman"
+                stroke="#2563eb"
+                strokeWidth={2}
+                dot={false}
+                name="Goodman"
+              />
+              <Line
+                type="monotone"
+                dataKey="gerber"
+                stroke="#16a34a"
+                strokeWidth={2}
+                dot={false}
+                name="Gerber"
+              />
+              <Line
+                type="monotone"
+                dataKey="soderberg"
+                stroke="#ea580c"
+                strokeWidth={2}
+                dot={false}
+                name="Soderberg"
+              />
+              <Line
+                type="monotone"
+                dataKey="morrow"
+                stroke="#475569"
+                strokeWidth={2}
+                dot={false}
+                name="Morrow"
+              />
+              <Scatter
+                data={operatingPointData}
+                dataKey="stress_amplitude"
+                fill="#dc2626"
+                name="Operating point"
+              />
+              {correctedPointData.length > 0 ? (
+                <Scatter
+                  data={correctedPointData}
+                  dataKey="stress_amplitude"
+                  fill="#2563eb"
+                  name="Corrected point"
+                />
+              ) : null}
+            </ComposedChart>
+          </ResponsiveContainer>
         </div>
       </CardContent>
     </Card>

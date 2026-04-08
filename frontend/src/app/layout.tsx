@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "FatigueSim Pro",
-  description: "Advanced Fatigue Life Analysis Tool",
+  title: "Fatigue Analysis Workspace",
+  description: "Fatigue life analysis for materials, S-N models and loading cases.",
 };
 
 export default function RootLayout({
@@ -12,8 +12,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark">
-      <body className="bg-slate-950 text-white antialiased">{children}</body>
+    <html lang="en">
+      <body className="bg-[#f8fafc] text-[#0f172a] antialiased">{children}</body>
     </html>
   );
 }
