@@ -33,7 +33,7 @@ vi.mock("recharts", () => ({
 }));
 
 describe("SNChart", () => {
-  it("renders both native and DeepSeek series when AI points are available", () => {
+  it("renders both native and AI series when AI points are available", () => {
     const chartData: SNChartData = {
       curve: [
         { cycles: 1e4, stress: 420 },
@@ -58,7 +58,7 @@ describe("SNChart", () => {
       },
     };
     const aiComparison: AIComparisonEnvelope = {
-      provider: "deepseek",
+      provider: "groq",
       enabled: true,
       status: "success",
       result: {
@@ -108,7 +108,7 @@ describe("SNChart", () => {
         ],
         goodman_or_haigh_points: [],
         warnings: [],
-        raw_model_name: "deepseek-chat",
+        raw_model_name: "openai/gpt-oss-20b",
       },
       error: null,
     };
@@ -122,6 +122,6 @@ describe("SNChart", () => {
     );
 
     expect(markup).toContain("Active S-N curve");
-    expect(markup).toContain("DeepSeek S-N curve:2");
+    expect(markup).toContain("AI S-N curve:2");
   });
 });

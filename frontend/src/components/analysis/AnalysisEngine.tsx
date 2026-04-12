@@ -18,7 +18,7 @@ export default function AnalysisEngine() {
     useState<FatigueAnalysisCompareResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [compareWithDeepSeek, setCompareWithDeepSeek] = useState(false);
+  const [compareWithAI, setCompareWithAI] = useState(false);
   const [snCurveSourceMode, setSnCurveSourceMode] =
     useState<SNCurveSourceMode>("material_basquin");
   const [snPoints, setSnPoints] = useState<SNFitPoint[]>([
@@ -64,14 +64,14 @@ export default function AnalysisEngine() {
           onSNCurveSourceModeChange={setSnCurveSourceMode}
           snPoints={snPoints}
           onSNPointsChange={setSnPoints}
-          compareWithDeepSeek={compareWithDeepSeek}
-          onCompareWithDeepSeekChange={setCompareWithDeepSeek}
+          compareWithAI={compareWithAI}
+          onCompareWithAIChange={setCompareWithAI}
         />
         <ResultsPanel
           results={response?.native_analysis ?? null}
           aiComparison={response?.ai_comparison ?? null}
           isLoading={isLoading}
-          showAIComparison={compareWithDeepSeek}
+          showAIComparison={compareWithAI}
         />
       </section>
 

@@ -32,35 +32,36 @@ def _parse_allowed_origins(raw_value: str | None) -> list[str]:
 class Settings:
     ENVIRONMENT: str
     ALLOWED_ORIGINS: list[str]
-    DEEPSEEK_API_KEY: str | None
-    DEEPSEEK_BASE_URL: str
-    DEEPSEEK_MODEL: str
-    DEEPSEEK_TIMEOUT_SECONDS: float
+    GROQ_API_KEY: str | None
+    GROQ_BASE_URL: str
+    GROQ_MODEL: str
+    GROQ_TIMEOUT_SECONDS: float
 
 
 @lru_cache
 def get_settings() -> Settings:
     environment = os.getenv("ENVIRONMENT", "development").strip().lower() or "development"
     allowed_origins = _parse_allowed_origins(os.getenv("ALLOWED_ORIGINS"))
-    timeout_seconds = float(os.getenv("DEEPSEEK_TIMEOUT_SECONDS", "20").strip() or "20")
+    timeout_seconds = float(os.getenv("GROQ_TIMEOUT_SECONDS", "20").strip() or "20")
 
     if environment == "production" and "*" in allowed_origins:
         raise ValueError("ALLOWED_ORIGINS cannot contain '*' in production.")
     if timeout_seconds <= 0:
-        raise ValueError("DEEPSEEK_TIMEOUT_SECONDS must be positive.")
+        raise ValueError("GROQ_TIMEOUT_SECONDS must be positive.")
 
     return Settings(
         ENVIRONMENT=environment,
         ALLOWED_ORIGINS=allowed_origins,
-        DEEPSEEK_API_KEY=os.getenv("DEEPSEEK_API_KEY"),
-        DEEPSEEK_BASE_URL=(
-            os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").strip()
-            or "https://api.deepseek.com"
+        GROQ_API_KEY=os.getenv("GROQ_API_KEY"),
+        GROQ_BASE_URL=(
+            os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1").strip()
+            or "https://api.groq.com/openai/v1"
         ),
-        DEEPSEEK_MODEL=(
-            os.getenv("DEEPSEEK_MODEL", "deepseek-chat").strip() or "deepseek-chat"
+        GROQ_MODEL=(
+            os.getenv("GROQ_MODEL", "openai/gpt-oss-20b").strip()
+            or "openai/gpt-oss-20b"
         ),
-        DEEPSEEK_TIMEOUT_SECONDS=timeout_seconds,
+        GROQ_TIMEOUT_SECONDS=timeout_seconds,
     )
 
 

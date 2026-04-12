@@ -207,7 +207,7 @@ export default function SNChart({
                   strokeWidth={2}
                   strokeDasharray="6 4"
                   dot={false}
-                  name="DeepSeek S-N curve"
+                  name="AI S-N curve"
                 />
               ) : null}
               {selectedPoint.length > 0 ? (

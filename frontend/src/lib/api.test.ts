@@ -221,7 +221,7 @@ describe("analyzeFatigue", () => {
         miner_damage: null,
       },
       ai_comparison: {
-        provider: "deepseek",
+        provider: "groq",
         enabled: true,
         status: "success",
         result: {
@@ -270,7 +270,7 @@ describe("analyzeFatigue", () => {
             [400, 0],
           ],
           warnings: [],
-          raw_model_name: "deepseek-chat",
+          raw_model_name: "openai/gpt-oss-20b",
         },
         error: null,
       },

@@ -17,7 +17,7 @@ from app.models.schemas import (
     FatigueAnalysisResponse,
     SurfaceFinishInput,
 )
-from app.services.deepseek_client import DeepSeekClient, DeepSeekClientError
+from app.services.groq_client import GroqClient, GroqClientError
 
 router = APIRouter(prefix="/api", tags=["analysis"])
 logger = logging.getLogger(__name__)
@@ -76,8 +76,8 @@ MATERIAL_PRESETS: list[dict] = [
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-def get_deepseek_client() -> DeepSeekClient:
-    return DeepSeekClient(settings)
+def get_groq_client() -> GroqClient:
+    return GroqClient(settings)
 
 
 def _resolve_surface_factor(request: FatigueAnalysisRequest) -> float:
@@ -182,7 +182,7 @@ def _build_ai_status(
     retriable: bool = False,
 ) -> dict:
     return {
-        "provider": "deepseek",
+        "provider": "groq",
         "enabled": enabled,
         "status": status,
         "result": result,
@@ -212,12 +212,12 @@ async def _run_ai_comparison(
         )
 
     payload = _build_ai_comparison_payload(request, native_analysis, ka)
-    client = get_deepseek_client()
+    client = get_groq_client()
 
     try:
         result = await client.compare_fatigue_analysis(payload)
-    except DeepSeekClientError as exc:
-        logger.warning("DeepSeek comparison failed code=%s", exc.code.value)
+    except GroqClientError as exc:
+        logger.warning("AI comparison failed code=%s", exc.code.value)
         return _build_ai_status(
             enabled=True,
             status="error",
@@ -226,12 +226,12 @@ async def _run_ai_comparison(
             retriable=exc.retriable,
         )
     except Exception:
-        logger.exception("Unexpected DeepSeek comparison failure")
+        logger.exception("Unexpected AI comparison failure")
         return _build_ai_status(
             enabled=True,
             status="error",
             error_code=AIComparisonErrorCode.unexpected_error,
-            error_message="DeepSeek comparison failed due to an unexpected internal error.",
+            error_message="AI comparison failed due to an unexpected internal error.",
             retriable=False,
         )
 

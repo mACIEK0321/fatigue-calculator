@@ -84,8 +84,8 @@ export default function ResultsPanel({
             {showAIComparison ? (
               <div className="rounded-xl border border-dashed border-[#99f6e4] bg-[#f0fdfa] px-4 py-3 text-sm text-[#115e59]">
                 {isLoading
-                  ? "DeepSeek comparison requested. The backend is preparing the native result and the optional AI JSON response."
-                  : "DeepSeek comparison is enabled. A comparison card will appear here after the next run."}
+                  ? "AI comparison requested. The backend is preparing the native result and the optional AI JSON response."
+                  : "AI comparison is enabled. A comparison card will appear here after the next run."}
               </div>
             ) : null}
           </div>
@@ -303,7 +303,7 @@ export default function ResultsPanel({
         <Card className="border-slate-200 bg-white shadow-sm">
           <CardHeader className="pb-3">
             <CardTitle className="text-base text-slate-900">
-              DeepSeek comparison
+              AI comparison
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -318,7 +318,7 @@ export default function ResultsPanel({
                       Native: {formatLife(results.selected_life)}
                     </p>
                     <p className="mt-1 text-sm text-slate-900">
-                      DeepSeek: {formatAIComparisonLife(aiComparison.result.life)}
+                      AI: {formatAIComparisonLife(aiComparison.result.life)}
                     </p>
                   </div>
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
@@ -329,7 +329,7 @@ export default function ResultsPanel({
                       Native: {results.selected_mean_stress_result.safety_factor.toFixed(3)}
                     </p>
                     <p className="mt-1 text-sm text-slate-900">
-                      DeepSeek:{" "}
+                      AI:{" "}
                       {aiComparison.result.safety_factor === null ||
                       aiComparison.result.safety_factor === undefined
                         ? "N/A"
@@ -349,7 +349,7 @@ export default function ResultsPanel({
                       {results.sn_curve_source.basquin_parameters.b.toFixed(4)}
                     </p>
                     <p className="mt-1 text-sm text-slate-900">
-                      DeepSeek:{" "}
+                      AI:{" "}
                       {aiComparison.result.basquin_parameters.sigma_f_prime !== null &&
                       aiComparison.result.basquin_parameters.sigma_f_prime !== undefined &&
                       aiComparison.result.basquin_parameters.b !== null &&
@@ -404,14 +404,14 @@ export default function ResultsPanel({
               </>
             ) : aiComparison?.status === "error" && aiComparison.error ? (
               <div className="rounded-xl border border-[#fed7aa] bg-[#fff7ed] px-4 py-3 text-sm text-[#9a3412]">
-                <p className="font-semibold">DeepSeek comparison unavailable</p>
+                <p className="font-semibold">AI comparison unavailable</p>
                 <p className="mt-1">{aiComparison.error.message}</p>
               </div>
             ) : (
               <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
                 {isLoading
-                  ? "Waiting for the optional DeepSeek comparison."
-                  : "DeepSeek comparison was skipped for this run."}
+                  ? "Waiting for the optional AI comparison."
+                  : "AI comparison was skipped for this run."}
               </div>
             )}
           </CardContent>

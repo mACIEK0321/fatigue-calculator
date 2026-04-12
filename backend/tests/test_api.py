@@ -81,7 +81,7 @@ def test_analyze_endpoint_supports_points_fit() -> None:
 def test_compare_endpoint_returns_native_and_ai_sections(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    class FakeDeepSeekClient:
+    class FakeGroqClient:
         async def compare_fatigue_analysis(self, comparison_input: dict):
             assert comparison_input["surface_factor"]["effective_ka"] > 0
             return AIComparisonResult(
@@ -128,10 +128,10 @@ def test_compare_endpoint_returns_native_and_ai_sections(
                 sn_curve_points=[(1e4, 390.0), (1e6, 240.0)],
                 goodman_or_haigh_points=[(0.0, 229.6), (600.0, 0.0)],
                 warnings=[],
-                raw_model_name="deepseek-chat",
+                raw_model_name="openai/gpt-oss-20b",
             )
 
-    monkeypatch.setattr(analysis, "get_deepseek_client", lambda: FakeDeepSeekClient())
+    monkeypatch.setattr(analysis, "get_groq_client", lambda: FakeGroqClient())
 
     response = client.post("/api/analyze/compare", json=compare_payload())
 
@@ -140,21 +140,22 @@ def test_compare_endpoint_returns_native_and_ai_sections(
     assert "native_analysis" in body
     assert body["native_analysis"]["selected_life"]["status"] == "infinite"
     assert body["ai_comparison"]["status"] == "success"
-    assert body["ai_comparison"]["result"]["raw_model_name"] == "deepseek-chat"
+    assert body["ai_comparison"]["provider"] == "groq"
+    assert body["ai_comparison"]["result"]["raw_model_name"] == "openai/gpt-oss-20b"
 
 
 def test_compare_endpoint_preserves_native_analysis_when_ai_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    class FakeDeepSeekClient:
+    class FakeGroqClient:
         async def compare_fatigue_analysis(self, comparison_input: dict):
-            raise analysis.DeepSeekClientError(
+            raise analysis.GroqClientError(
                 code=analysis.AIComparisonErrorCode.timeout,
-                message="DeepSeek comparison timed out before a valid response arrived.",
+                message="AI comparison timed out before a valid response arrived.",
                 retriable=True,
             )
 
-    monkeypatch.setattr(analysis, "get_deepseek_client", lambda: FakeDeepSeekClient())
+    monkeypatch.setattr(analysis, "get_groq_client", lambda: FakeGroqClient())
 
     response = client.post("/api/analyze/compare", json=compare_payload())
 

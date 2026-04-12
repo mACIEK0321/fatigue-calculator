@@ -1,4 +1,4 @@
-"""Tests for the optional DeepSeek adapter."""
+"""Tests for the optional Groq adapter."""
 
 from __future__ import annotations
 
@@ -9,20 +9,19 @@ import pytest
 
 from app.core.config import Settings
 from app.models.schemas import AIComparisonErrorCode
-from app.services.deepseek_client import DeepSeekClient, DeepSeekClientError
+from app.services.groq_client import GroqClient, GroqClientError
 
-
-REQUEST = httpx.Request("POST", "https://api.deepseek.com/chat/completions")
+REQUEST = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
 
 
 def build_settings() -> Settings:
     return Settings(
         ENVIRONMENT="development",
         ALLOWED_ORIGINS=["http://localhost:3000"],
-        DEEPSEEK_API_KEY="test-key",
-        DEEPSEEK_BASE_URL="https://api.deepseek.com",
-        DEEPSEEK_MODEL="deepseek-chat",
-        DEEPSEEK_TIMEOUT_SECONDS=5.0,
+        GROQ_API_KEY="test-key",
+        GROQ_BASE_URL="https://api.groq.com/openai/v1",
+        GROQ_MODEL="openai/gpt-oss-20b",
+        GROQ_TIMEOUT_SECONDS=5.0,
     )
 
 
@@ -77,20 +76,39 @@ def build_comparison_input() -> dict:
     }
 
 
-def test_build_chat_payload_uses_json_output_contract() -> None:
-    client = DeepSeekClient(build_settings())
+def test_build_chat_payload_uses_json_schema_contract() -> None:
+    client = GroqClient(build_settings())
 
     payload = client.build_chat_payload(build_comparison_input())
 
-    assert payload["model"] == "deepseek-chat"
-    assert payload["response_format"] == {"type": "json_object"}
+    assert payload["model"] == "openai/gpt-oss-20b"
+    assert payload["response_format"]["type"] == "json_schema"
+    assert payload["response_format"]["json_schema"]["strict"] is True
+    assert payload["response_format"]["json_schema"]["schema"]["additionalProperties"] is False
     assert payload["messages"][0]["role"] == "system"
-    assert "Return exactly one JSON object" in payload["messages"][0]["content"]
-    assert "sn_curve_points" in payload["messages"][1]["content"]
+    assert "structured JSON response" in payload["messages"][0]["content"]
+    assert "raw_model_name" in payload["messages"][1]["content"]
+
+
+def test_build_chat_payload_disables_strict_for_non_strict_models() -> None:
+    settings = Settings(
+        ENVIRONMENT="development",
+        ALLOWED_ORIGINS=["http://localhost:3000"],
+        GROQ_API_KEY="test-key",
+        GROQ_BASE_URL="https://api.groq.com/openai/v1",
+        GROQ_MODEL="llama-3.3-70b-versatile",
+        GROQ_TIMEOUT_SECONDS=5.0,
+    )
+    client = GroqClient(settings)
+
+    payload = client.build_chat_payload(build_comparison_input())
+
+    assert payload["response_format"]["type"] == "json_schema"
+    assert payload["response_format"]["json_schema"]["strict"] is False
 
 
 def test_compare_fatigue_analysis_parses_valid_json(monkeypatch: pytest.MonkeyPatch) -> None:
-    client = DeepSeekClient(build_settings())
+    client = GroqClient(build_settings())
 
     class FakeAsyncClient:
         def __init__(self, *args, **kwargs) -> None:
@@ -155,7 +173,7 @@ def test_compare_fatigue_analysis_parses_valid_json(monkeypatch: pytest.MonkeyPa
                                   "sn_curve_points": [[10000.0, 390.0], [1000000.0, 240.0]],
                                   "goodman_or_haigh_points": [[0.0, 229.6], [400.0, 0.0]],
                                   "warnings": [],
-                                  "raw_model_name": "deepseek-chat"
+                                  "raw_model_name": "openai/gpt-oss-20b"
                                 }
                                 """,
                             }
@@ -164,7 +182,7 @@ def test_compare_fatigue_analysis_parses_valid_json(monkeypatch: pytest.MonkeyPa
                 },
             )
 
-    monkeypatch.setattr("app.services.deepseek_client.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("app.services.groq_client.httpx.AsyncClient", FakeAsyncClient)
 
     result = asyncio.run(client.compare_fatigue_analysis(build_comparison_input()))
 
@@ -174,7 +192,7 @@ def test_compare_fatigue_analysis_parses_valid_json(monkeypatch: pytest.MonkeyPa
 
 
 def test_compare_fatigue_analysis_maps_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
-    client = DeepSeekClient(build_settings())
+    client = GroqClient(build_settings())
 
     class FakeAsyncClient:
         def __init__(self, *args, **kwargs) -> None:
@@ -189,9 +207,9 @@ def test_compare_fatigue_analysis_maps_timeout(monkeypatch: pytest.MonkeyPatch) 
         async def post(self, *args, **kwargs) -> httpx.Response:
             raise httpx.ReadTimeout("boom")
 
-    monkeypatch.setattr("app.services.deepseek_client.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("app.services.groq_client.httpx.AsyncClient", FakeAsyncClient)
 
-    with pytest.raises(DeepSeekClientError) as exc_info:
+    with pytest.raises(GroqClientError) as exc_info:
         asyncio.run(client.compare_fatigue_analysis(build_comparison_input()))
 
     assert exc_info.value.code == AIComparisonErrorCode.timeout
@@ -201,7 +219,7 @@ def test_compare_fatigue_analysis_maps_timeout(monkeypatch: pytest.MonkeyPatch) 
 def test_compare_fatigue_analysis_includes_upstream_http_message(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = DeepSeekClient(build_settings())
+    client = GroqClient(build_settings())
 
     class FakeAsyncClient:
         def __init__(self, *args, **kwargs) -> None:
@@ -217,22 +235,22 @@ def test_compare_fatigue_analysis_includes_upstream_http_message(
             return httpx.Response(
                 402,
                 request=REQUEST,
-                json={"error": {"message": "Insufficient Balance"}},
+                json={"error": {"message": "Insufficient Credits"}},
             )
 
-    monkeypatch.setattr("app.services.deepseek_client.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("app.services.groq_client.httpx.AsyncClient", FakeAsyncClient)
 
-    with pytest.raises(DeepSeekClientError) as exc_info:
+    with pytest.raises(GroqClientError) as exc_info:
         asyncio.run(client.compare_fatigue_analysis(build_comparison_input()))
 
     assert exc_info.value.code == AIComparisonErrorCode.http_error
-    assert "Insufficient Balance" in exc_info.value.message
+    assert "Insufficient Credits" in exc_info.value.message
 
 
 def test_compare_fatigue_analysis_rejects_schema_mismatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = DeepSeekClient(build_settings())
+    client = GroqClient(build_settings())
 
     class FakeAsyncClient:
         def __init__(self, *args, **kwargs) -> None:
@@ -259,9 +277,9 @@ def test_compare_fatigue_analysis_rejects_schema_mismatch(
                 },
             )
 
-    monkeypatch.setattr("app.services.deepseek_client.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("app.services.groq_client.httpx.AsyncClient", FakeAsyncClient)
 
-    with pytest.raises(DeepSeekClientError) as exc_info:
+    with pytest.raises(GroqClientError) as exc_info:
         asyncio.run(client.compare_fatigue_analysis(build_comparison_input()))
 
     assert exc_info.value.code == AIComparisonErrorCode.schema_validation
@@ -270,7 +288,7 @@ def test_compare_fatigue_analysis_rejects_schema_mismatch(
 def test_compare_fatigue_analysis_rejects_invalid_json_content(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = DeepSeekClient(build_settings())
+    client = GroqClient(build_settings())
 
     class FakeAsyncClient:
         def __init__(self, *args, **kwargs) -> None:
@@ -297,9 +315,9 @@ def test_compare_fatigue_analysis_rejects_invalid_json_content(
                 },
             )
 
-    monkeypatch.setattr("app.services.deepseek_client.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr("app.services.groq_client.httpx.AsyncClient", FakeAsyncClient)
 
-    with pytest.raises(DeepSeekClientError) as exc_info:
+    with pytest.raises(GroqClientError) as exc_info:
         asyncio.run(client.compare_fatigue_analysis(build_comparison_input()))
 
     assert exc_info.value.code == AIComparisonErrorCode.invalid_json

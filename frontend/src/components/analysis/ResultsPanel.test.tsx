@@ -231,11 +231,11 @@ describe("ResultsPanel", () => {
     };
 
     const aiComparison: AIComparisonEnvelope = {
-      provider: "deepseek",
+      provider: "groq",
       enabled: true,
       status: "success",
       result: {
-        summary: "DeepSeek summary",
+        summary: "Groq summary",
         assumptions: ["Assume nominal room temperature."],
         interpreted_inputs: {
           material_label: null,
@@ -284,7 +284,7 @@ describe("ResultsPanel", () => {
           [572, 0],
         ],
         warnings: ["Comparison warning"],
-        raw_model_name: "deepseek-chat",
+        raw_model_name: "openai/gpt-oss-20b",
       },
       error: null,
     };
@@ -302,8 +302,8 @@ describe("ResultsPanel", () => {
     expect(markup).toContain(
       "Final chart and life result use the backend response, not the local form preview."
     );
-    expect(markup).toContain("DeepSeek comparison");
-    expect(markup).toContain("DeepSeek: 700.0k cycles");
+    expect(markup).toContain("AI comparison");
+    expect(markup).toContain("AI: 700.0k cycles");
     expect(markup).toContain("Comparison warning");
   });
 
@@ -399,13 +399,13 @@ describe("ResultsPanel", () => {
       miner_damage: null,
     };
     const aiComparison: AIComparisonEnvelope = {
-      provider: "deepseek",
+      provider: "groq",
       enabled: true,
       status: "error",
       result: null,
       error: {
         code: "timeout",
-        message: "DeepSeek comparison timed out before a valid response arrived.",
+        message: "AI comparison timed out before a valid response arrived.",
         retriable: true,
       },
     };
@@ -420,7 +420,7 @@ describe("ResultsPanel", () => {
     );
 
     expect(markup).toContain("Infinite life");
-    expect(markup).toContain("DeepSeek comparison unavailable");
+    expect(markup).toContain("AI comparison unavailable");
     expect(markup).toContain("timed out");
   });
 
@@ -434,6 +434,6 @@ describe("ResultsPanel", () => {
       />
     );
 
-    expect(markup).toContain("DeepSeek comparison requested.");
+    expect(markup).toContain("AI comparison requested.");
   });
 });

@@ -608,7 +608,7 @@ class AIComparisonResult(BaseModel):
     )
     raw_model_name: str = Field(
         ...,
-        description="Exact upstream model identifier reported by DeepSeek",
+        description="Exact upstream model identifier reported by the AI provider",
     )
 
 

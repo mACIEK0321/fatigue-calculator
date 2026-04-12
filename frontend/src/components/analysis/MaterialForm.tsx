@@ -42,8 +42,8 @@ interface MaterialFormProps {
   onSNCurveSourceModeChange: (mode: SNCurveSourceMode) => void;
   snPoints: SNFitPoint[];
   onSNPointsChange: (points: SNFitPoint[]) => void;
-  compareWithDeepSeek: boolean;
-  onCompareWithDeepSeekChange: (enabled: boolean) => void;
+  compareWithAI: boolean;
+  onCompareWithAIChange: (enabled: boolean) => void;
 }
 
 const defaultMaterial: MaterialProperties = {
@@ -249,8 +249,8 @@ export default function MaterialForm({
   onSNCurveSourceModeChange,
   snPoints,
   onSNPointsChange,
-  compareWithDeepSeek,
-  onCompareWithDeepSeekChange,
+  compareWithAI,
+  onCompareWithAIChange,
 }: MaterialFormProps) {
   const [presets, setPresets] = useState<MaterialPreset[]>([]);
   const [material, setMaterial] = useState<MaterialProperties>(defaultMaterial);
@@ -543,7 +543,7 @@ export default function MaterialForm({
     const request: FatigueAnalysisCompareRequest = buildFatigueComparisonRequest(
       values,
       {
-        enabled: compareWithDeepSeek,
+        enabled: compareWithAI,
         include_interpreted_inputs: true,
         include_sn_curve_points: true,
         include_goodman_or_haigh_points: true,
@@ -968,15 +968,13 @@ export default function MaterialForm({
               <label className="flex items-start gap-3 rounded-2xl border border-[#e2e8f0] bg-[#f8fafc] px-4 py-3">
                 <input
                   type="checkbox"
-                  checked={compareWithDeepSeek}
-                  onChange={(event) =>
-                    onCompareWithDeepSeekChange(event.target.checked)
-                  }
+                  checked={compareWithAI}
+                  onChange={(event) => onCompareWithAIChange(event.target.checked)}
                   className="mt-1 h-4 w-4 rounded border-[#94a3b8] text-[#0f766e] focus:ring-[#0f766e]"
                 />
                 <span>
                   <span className="block text-sm font-semibold text-[#0f172a]">
-                    Compare with DeepSeek
+                    Compare with AI
                   </span>
                   <span className="block text-sm text-[#475569]">
                     Run the native backend analysis first and optionally request a
