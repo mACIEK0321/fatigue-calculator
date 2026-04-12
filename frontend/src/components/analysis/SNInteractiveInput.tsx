@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useRef } from "react";
+import React, { useMemo } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import {
   CartesianGrid,
@@ -11,11 +11,16 @@ import {
   Tooltip,
   XAxis,
   YAxis,
+  getRelativeCoordinate,
+  usePlotArea,
+  useXAxisInverseScale,
+  useYAxisInverseScale,
 } from "recharts";
 import type { TooltipProps, TooltipValueType } from "recharts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { mapSNChartPositionToPoint } from "@/lib/sn-chart";
 import type { SNFitPoint } from "@/types/fatigue";
 
 interface BasquinFitDraft {
@@ -120,8 +125,6 @@ export default function SNInteractiveInput({
   points,
   onPointsChange,
 }: SNInteractiveInputProps) {
-  const wrapperRef = useRef<HTMLDivElement | null>(null);
-
   const sanitizedPoints = useMemo(
     () => points.filter((point) => point.cycles > 0 && point.stress > 0),
     [points]
@@ -174,45 +177,6 @@ export default function SNInteractiveInput({
 
   const addPoint = () => {
     onPointsChange([...points, { cycles: 1e5, stress: 250 }]);
-  };
-
-  const handleChartClick = (event: React.MouseEvent<HTMLDivElement>) => {
-    const wrapper = wrapperRef.current;
-    if (!wrapper) return;
-
-    const rect = wrapper.getBoundingClientRect();
-    const chartX = event.clientX - rect.left;
-    const chartY = event.clientY - rect.top;
-
-    const plotLeft = CHART_MARGINS.left;
-    const plotRight = rect.width - CHART_MARGINS.right;
-    const plotTop = CHART_MARGINS.top;
-    const plotBottom = rect.height - CHART_MARGINS.bottom;
-
-    if (
-      chartX < plotLeft ||
-      chartX > plotRight ||
-      chartY < plotTop ||
-      chartY > plotBottom
-    ) {
-      return;
-    }
-
-    const xFraction = (chartX - plotLeft) / (plotRight - plotLeft);
-    const yFraction = (plotBottom - chartY) / (plotBottom - plotTop);
-    const logX =
-      Math.log10(X_MIN) +
-      xFraction * (Math.log10(X_MAX) - Math.log10(X_MIN));
-    const logY =
-      Math.log10(yDomain[0]) +
-      yFraction * (Math.log10(yDomain[1]) - Math.log10(yDomain[0]));
-
-    const cycles = clamp(10 ** logX, X_MIN, X_MAX);
-    const stress = Math.max(1, 10 ** logY);
-    onPointsChange([
-      ...points,
-      { cycles: Math.round(cycles), stress: Number(stress.toFixed(2)) },
-    ]);
   };
 
   return (
@@ -318,13 +282,12 @@ export default function SNInteractiveInput({
             {fit ? `R² = ${fit.rSquared.toFixed(4)}` : "Awaiting valid points"}
           </p>
         </div>
-        <div
-          ref={wrapperRef}
-          className="h-[300px] w-full cursor-crosshair"
-          onClick={handleChartClick}
-        >
+        <div className="h-[300px] w-full cursor-crosshair">
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart margin={CHART_MARGINS}>
+              <ChartClickOverlay
+                onAddPoint={(point) => onPointsChange([...points, point])}
+              />
               <CartesianGrid stroke="#e2e8f0" strokeDasharray="4 4" />
               <XAxis
                 type="number"
@@ -384,5 +347,49 @@ export default function SNInteractiveInput({
         </div>
       </div>
     </div>
+  );
+}
+
+function ChartClickOverlay({
+  onAddPoint,
+}: {
+  onAddPoint: (point: SNFitPoint) => void;
+}) {
+  const plotArea = usePlotArea();
+  const xInverseScale = useXAxisInverseScale();
+  const yInverseScale = useYAxisInverseScale();
+
+  if (!plotArea || !xInverseScale || !yInverseScale) {
+    return null;
+  }
+
+  const handleClick = (event: React.MouseEvent<SVGRectElement>) => {
+    const { relativeX, relativeY } = getRelativeCoordinate(event);
+    const point = mapSNChartPositionToPoint({
+      chartX: plotArea.x + relativeX,
+      chartY: plotArea.y + relativeY,
+      plotArea,
+      getCyclesAtPixel: xInverseScale,
+      getStressAtPixel: yInverseScale,
+      xMin: X_MIN,
+      xMax: X_MAX,
+    });
+
+    if (!point) {
+      return;
+    }
+
+    onAddPoint(point);
+  };
+
+  return (
+    <rect
+      x={plotArea.x}
+      y={plotArea.y}
+      width={plotArea.width}
+      height={plotArea.height}
+      fill="transparent"
+      onClick={handleClick}
+    />
   );
 }

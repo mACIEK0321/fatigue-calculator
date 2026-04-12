@@ -19,6 +19,7 @@ import {
   buildFatigueAnalysisRequest,
   sanitizePoints,
 } from "@/lib/analysis-request";
+import { parseNumericDraft, toNumericDraft } from "@/lib/analysis-form";
 import type {
   FatigueAnalysisRequest,
   LoadingBlock,
@@ -66,6 +67,61 @@ const defaultNotch: NotchSensitivityInput = {
   notch_radius_mm: 1,
   notch_constant_mm: 0.25,
 };
+
+type EditableMaterialField =
+  | "uts"
+  | "yield_strength"
+  | "endurance_limit"
+  | "elastic_modulus"
+  | "fatigue_strength_coefficient"
+  | "fatigue_strength_exponent";
+
+type MaterialDrafts = Record<EditableMaterialField, string>;
+type MarinFactorDrafts = Record<keyof MarinFactors, string>;
+type NotchDrafts = Record<
+  Exclude<keyof NotchSensitivityInput, "model">,
+  string
+>;
+type LoadingBlockDraft = Record<keyof LoadingBlock, string>;
+
+function getMaterialDrafts(material: MaterialProperties): MaterialDrafts {
+  return {
+    uts: toNumericDraft(material.uts),
+    yield_strength: toNumericDraft(material.yield_strength),
+    endurance_limit: toNumericDraft(material.endurance_limit),
+    elastic_modulus: toNumericDraft(material.elastic_modulus),
+    fatigue_strength_coefficient: toNumericDraft(
+      material.fatigue_strength_coefficient
+    ),
+    fatigue_strength_exponent: toNumericDraft(material.fatigue_strength_exponent),
+  };
+}
+
+function getMarinFactorDrafts(factors: MarinFactors): MarinFactorDrafts {
+  return {
+    size_factor: toNumericDraft(factors.size_factor),
+    load_factor: toNumericDraft(factors.load_factor),
+    temperature_factor: toNumericDraft(factors.temperature_factor),
+    reliability_factor: toNumericDraft(factors.reliability_factor),
+  };
+}
+
+function getNotchDrafts(notch: NotchSensitivityInput): NotchDrafts {
+  return {
+    kt: toNumericDraft(notch.kt),
+    notch_radius_mm: toNumericDraft(notch.notch_radius_mm),
+    notch_constant_mm: toNumericDraft(notch.notch_constant_mm),
+  };
+}
+
+function getLoadingBlockDraft(block: LoadingBlock): LoadingBlockDraft {
+  return {
+    max_stress: toNumericDraft(block.max_stress),
+    min_stress: toNumericDraft(block.min_stress),
+    cycles: toNumericDraft(block.cycles),
+    repeats: toNumericDraft(block.repeats),
+  };
+}
 
 function Section({
   title,
@@ -135,9 +191,9 @@ function LoadingBlockRow({
   onChange,
   onRemove,
 }: {
-  block: LoadingBlock;
+  block: LoadingBlockDraft;
   index: number;
-  onChange: (index: number, field: keyof LoadingBlock, value: string) => void;
+  onChange: (index: number, field: keyof LoadingBlockDraft, value: string) => void;
   onRemove: (index: number) => void;
 }) {
   return (
@@ -193,20 +249,29 @@ export default function MaterialForm({
 }: MaterialFormProps) {
   const [presets, setPresets] = useState<MaterialPreset[]>([]);
   const [material, setMaterial] = useState<MaterialProperties>(defaultMaterial);
+  const [materialDrafts, setMaterialDrafts] = useState<MaterialDrafts>(() =>
+    getMaterialDrafts(defaultMaterial)
+  );
   const [surfaceFactorMode, setSurfaceFactorMode] =
     useState<SurfaceFactorMode>("empirical_surface_finish");
   const [surfaceFinish, setSurfaceFinish] =
     useState<SurfaceFinishType>("machined");
-  const [manualSurfaceFactor, setManualSurfaceFactor] = useState(0.85);
-  const [marinFactors, setMarinFactors] =
-    useState<MarinFactors>(defaultMarinFactors);
+  const [manualSurfaceFactorDraft, setManualSurfaceFactorDraft] = useState(
+    toNumericDraft(0.85)
+  );
+  const [marinFactorDrafts, setMarinFactorDrafts] =
+    useState<MarinFactorDrafts>(() => getMarinFactorDrafts(defaultMarinFactors));
   const [selectedModel, setSelectedModel] =
     useState<MeanStressModel>("goodman");
-  const [maxStress, setMaxStress] = useState(300);
-  const [minStress, setMinStress] = useState(-100);
+  const [maxStressDraft, setMaxStressDraft] = useState(toNumericDraft(300));
+  const [minStressDraft, setMinStressDraft] = useState(toNumericDraft(-100));
   const [useNotch, setUseNotch] = useState(false);
-  const [notch, setNotch] = useState<NotchSensitivityInput>(defaultNotch);
-  const [loadingBlocks, setLoadingBlocks] = useState<LoadingBlock[]>([]);
+  const [notchModel, setNotchModel] =
+    useState<NotchSensitivityInput["model"]>(defaultNotch.model);
+  const [notchDrafts, setNotchDrafts] = useState<NotchDrafts>(() =>
+    getNotchDrafts(defaultNotch)
+  );
+  const [loadingBlocks, setLoadingBlocks] = useState<LoadingBlockDraft[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
@@ -226,7 +291,7 @@ export default function MaterialForm({
       return;
     }
 
-    setMaterial({
+    const nextMaterial: MaterialProperties = {
       uts: preset.uts,
       yield_strength: preset.yield_strength,
       endurance_limit: preset.endurance_limit ?? undefined,
@@ -235,82 +300,63 @@ export default function MaterialForm({
       fatigue_strength_exponent: preset.fatigue_strength_exponent,
       fatigue_ductility_coefficient: preset.fatigue_ductility_coefficient,
       fatigue_ductility_exponent: preset.fatigue_ductility_exponent,
-    });
+    };
+
+    setMaterial(nextMaterial);
+    setMaterialDrafts(getMaterialDrafts(nextMaterial));
   };
 
   const updateMaterialNumber = (
-    field: keyof MaterialProperties,
+    field: EditableMaterialField,
     value: string,
     allowEmpty = false
   ) => {
+    setMaterialDrafts((current) => ({ ...current, [field]: value }));
+
     if (allowEmpty && value.trim() === "") {
-      setMaterial((current) => ({ ...current, [field]: undefined }));
+      setMaterial((current) => ({ ...current, [field]: undefined } as MaterialProperties));
       return;
     }
 
-    const parsed = Number(value);
-    if (Number.isNaN(parsed)) {
+    const parsed = parseNumericDraft(value);
+    if (parsed === undefined) {
       return;
     }
 
-    setMaterial((current) => ({ ...current, [field]: parsed }));
+    setMaterial((current) => ({ ...current, [field]: parsed } as MaterialProperties));
   };
 
   const updateMarinFactor = (field: keyof MarinFactors, value: string) => {
-    const parsed = Number(value);
-    if (Number.isNaN(parsed)) {
-      return;
-    }
-
-    setMarinFactors((current) => ({ ...current, [field]: parsed }));
+    setMarinFactorDrafts((current) => ({ ...current, [field]: value }));
   };
 
-  const updateNotch = (
-    field: keyof NotchSensitivityInput,
-    value: string | NotchSensitivityInput["model"]
-  ) => {
-    if (field === "model") {
-      setNotch((current) => ({
-        ...current,
-        model: value as NotchSensitivityInput["model"],
-      }));
-      return;
-    }
-
-    const parsed = Number(value);
-    if (Number.isNaN(parsed)) {
-      return;
-    }
-
-    setNotch((current) => ({ ...current, [field]: parsed }));
+  const updateNotch = (field: keyof NotchDrafts, value: string) => {
+    setNotchDrafts((current) => ({ ...current, [field]: value }));
   };
 
   const addLoadingBlock = () => {
+    const primaryMaxStress = parseNumericDraft(maxStressDraft) ?? 300;
+    const primaryMinStress = parseNumericDraft(minStressDraft) ?? -100;
+
     setLoadingBlocks((current) => [
       ...current,
-      { max_stress: maxStress, min_stress: minStress, cycles: 1e5, repeats: 1 },
+      getLoadingBlockDraft({
+        max_stress: primaryMaxStress,
+        min_stress: primaryMinStress,
+        cycles: 1e5,
+        repeats: 1,
+      }),
     ]);
   };
 
   const updateLoadingBlock = (
     index: number,
-    field: keyof LoadingBlock,
+    field: keyof LoadingBlockDraft,
     value: string
   ) => {
-    const parsed = Number(value);
-    if (Number.isNaN(parsed)) {
-      return;
-    }
-
     setLoadingBlocks((current) =>
       current.map((block, blockIndex) =>
-        blockIndex === index
-          ? {
-              ...block,
-              [field]:
-                field === "repeats" ? Math.max(1, Math.round(parsed)) : parsed,
-            }
-          : block
+        blockIndex === index ? { ...block, [field]: value } : block
       )
     );
   };
@@ -321,86 +367,175 @@ export default function MaterialForm({
     );
   };
 
-  const validate = (): string | null => {
-    if (material.uts <= 0 || material.yield_strength <= 0) {
-      return "UTS and yield strength must be positive.";
+  const parseFormValues = (): {
+    error: string | null;
+    values?: Parameters<typeof buildFatigueAnalysisRequest>[0];
+  } => {
+    const uts = parseNumericDraft(materialDrafts.uts);
+    const yieldStrength = parseNumericDraft(materialDrafts.yield_strength);
+    const enduranceLimit = parseNumericDraft(materialDrafts.endurance_limit);
+    const elasticModulus = parseNumericDraft(materialDrafts.elastic_modulus);
+    const fatigueStrengthCoefficient = parseNumericDraft(
+      materialDrafts.fatigue_strength_coefficient
+    );
+    const fatigueStrengthExponent = parseNumericDraft(
+      materialDrafts.fatigue_strength_exponent
+    );
+    const maxStress = parseNumericDraft(maxStressDraft);
+    const minStress = parseNumericDraft(minStressDraft);
+    const manualSurfaceFactor = parseNumericDraft(manualSurfaceFactorDraft);
+    const sizeFactor = parseNumericDraft(marinFactorDrafts.size_factor);
+    const loadFactor = parseNumericDraft(marinFactorDrafts.load_factor);
+    const temperatureFactor = parseNumericDraft(
+      marinFactorDrafts.temperature_factor
+    );
+    const reliabilityFactor = parseNumericDraft(
+      marinFactorDrafts.reliability_factor
+    );
+
+    if (uts === undefined || yieldStrength === undefined || uts <= 0 || yieldStrength <= 0) {
+      return { error: "UTS and yield strength must be positive." };
     }
-    if (material.yield_strength > material.uts) {
-      return "Yield strength cannot exceed UTS.";
+    if (elasticModulus === undefined || elasticModulus <= 0) {
+      return { error: "Elastic modulus must be positive." };
+    }
+    if (yieldStrength > uts) {
+      return { error: "Yield strength cannot exceed UTS." };
+    }
+    if (maxStress === undefined || minStress === undefined) {
+      return { error: "Enter valid maximum and minimum stress values." };
     }
     if (maxStress < minStress) {
-      return "Maximum stress must be greater than or equal to minimum stress.";
+      return {
+        error: "Maximum stress must be greater than or equal to minimum stress.",
+      };
     }
 
     if (snCurveSourceMode === "material_basquin") {
-      const hasSigmaF = material.fatigue_strength_coefficient !== undefined;
-      const hasB = material.fatigue_strength_exponent !== undefined;
+      const hasSigmaF = fatigueStrengthCoefficient !== undefined;
+      const hasB = fatigueStrengthExponent !== undefined;
       if (hasSigmaF !== hasB) {
-        return "Provide both sigma_f' and b, or leave both empty to use defaults.";
+        return {
+          error: "Provide both sigma_f' and b, or leave both empty to use defaults.",
+        };
       }
-      if (
-        material.fatigue_strength_exponent !== undefined &&
-        material.fatigue_strength_exponent >= 0
-      ) {
-        return "Basquin exponent b must be negative.";
+      if (fatigueStrengthExponent !== undefined && fatigueStrengthExponent >= 0) {
+        return { error: "Basquin exponent b must be negative." };
       }
     }
 
     if (snCurveSourceMode === "points_fit" && validSNPoints.length < 2) {
-      return "Points + fit mode requires at least two valid S-N points.";
+      return { error: "Points + fit mode requires at least two valid S-N points." };
     }
 
     if (
       surfaceFactorMode === "manual_factor" &&
-      (!Number.isFinite(manualSurfaceFactor) || manualSurfaceFactor <= 0)
+      !(manualSurfaceFactor !== undefined && manualSurfaceFactor > 0)
     ) {
-      return "Manual surface factor must be positive.";
+      return { error: "Manual surface factor must be positive." };
     }
 
     if (
-      useNotch &&
-      (notch.kt < 1 ||
-        notch.notch_radius_mm <= 0 ||
-        notch.notch_constant_mm <= 0)
+      sizeFactor === undefined ||
+      loadFactor === undefined ||
+      temperatureFactor === undefined ||
+      reliabilityFactor === undefined
     ) {
-      return "Notch inputs must satisfy Kt >= 1 and positive geometric values.";
+      return { error: "Marin factors must be valid numbers." };
     }
 
+    const parsedLoadingBlocks: LoadingBlock[] = [];
     for (const block of loadingBlocks) {
-      if (block.max_stress < block.min_stress) {
-        return "Every loading block must satisfy max stress >= min stress.";
+      const blockMaxStress = parseNumericDraft(block.max_stress);
+      const blockMinStress = parseNumericDraft(block.min_stress);
+      const cycles = parseNumericDraft(block.cycles);
+      const repeats = parseNumericDraft(block.repeats);
+
+      if (blockMaxStress === undefined || blockMinStress === undefined) {
+        return { error: "Every loading block must use valid numeric stresses." };
       }
-      if (block.cycles <= 0 || block.repeats < 1) {
-        return "Loading blocks require positive cycles and repeats >= 1.";
+      if (blockMaxStress < blockMinStress) {
+        return {
+          error: "Every loading block must satisfy max stress >= min stress.",
+        };
       }
+      if (
+        !(cycles !== undefined && cycles > 0) ||
+        !(repeats !== undefined && repeats >= 1)
+      ) {
+        return { error: "Loading blocks require positive cycles and repeats >= 1." };
+      }
+
+      parsedLoadingBlocks.push({
+        max_stress: blockMaxStress,
+        min_stress: blockMinStress,
+        cycles,
+        repeats: Math.max(1, Math.round(repeats)),
+      });
     }
 
-    return null;
+    const kt = parseNumericDraft(notchDrafts.kt);
+    const notchRadius = parseNumericDraft(notchDrafts.notch_radius_mm);
+    const notchConstant = parseNumericDraft(notchDrafts.notch_constant_mm);
+
+    if (
+      useNotch &&
+      (!(kt !== undefined && kt >= 1) ||
+        !(notchRadius !== undefined && notchRadius > 0) ||
+        !(notchConstant !== undefined && notchConstant > 0))
+    ) {
+      return {
+        error: "Notch inputs must satisfy Kt >= 1 and positive geometric values.",
+      };
+    }
+
+    return {
+      error: null,
+      values: {
+        material: {
+          ...material,
+          uts: uts,
+          yield_strength: yieldStrength,
+          endurance_limit: enduranceLimit,
+          elastic_modulus: elasticModulus,
+          fatigue_strength_coefficient: fatigueStrengthCoefficient,
+          fatigue_strength_exponent: fatigueStrengthExponent,
+        },
+        maxStress: maxStress,
+        minStress: minStress,
+        snCurveSourceMode,
+        snPoints: validSNPoints,
+        surfaceFactorMode,
+        surfaceFinish,
+        manualSurfaceFactor: manualSurfaceFactor ?? 0.85,
+        marinFactors: {
+          size_factor: sizeFactor,
+          load_factor: loadFactor,
+          temperature_factor: temperatureFactor,
+          reliability_factor: reliabilityFactor,
+        },
+        selectedModel,
+        useNotch,
+        notch: {
+          model: notchModel,
+          kt: kt ?? defaultNotch.kt,
+          notch_radius_mm: notchRadius ?? defaultNotch.notch_radius_mm,
+          notch_constant_mm: notchConstant ?? defaultNotch.notch_constant_mm,
+        },
+        loadingBlocks: parsedLoadingBlocks,
+      },
+    };
   };
 
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault();
-    const validationError = validate();
-    setFormError(validationError);
-    if (validationError) {
+    const { error, values } = parseFormValues();
+    setFormError(error);
+    if (error || !values) {
       return;
     }
 
-    const request: FatigueAnalysisRequest = buildFatigueAnalysisRequest({
-      material,
-      maxStress,
-      minStress,
-      snCurveSourceMode,
-      snPoints: validSNPoints,
-      surfaceFactorMode,
-      surfaceFinish,
-      manualSurfaceFactor,
-      marinFactors,
-      selectedModel,
-      useNotch,
-      notch,
-      loadingBlocks,
-    });
+    const request: FatigueAnalysisRequest = buildFatigueAnalysisRequest(values);
 
     onSubmit(request);
   };
@@ -443,14 +578,14 @@ export default function MaterialForm({
               <NumericField
                 label="Ultimate tensile strength UTS"
                 unit="MPa"
-                value={material.uts}
+                value={materialDrafts.uts}
                 placeholder="e.g. 600"
                 onChange={(value) => updateMaterialNumber("uts", value)}
               />
               <NumericField
                 label="Yield strength"
                 unit="MPa"
-                value={material.yield_strength}
+                value={materialDrafts.yield_strength}
                 placeholder="e.g. 400"
                 onChange={(value) =>
                   updateMaterialNumber("yield_strength", value)
@@ -459,7 +594,7 @@ export default function MaterialForm({
               <NumericField
                 label="Endurance limit Se"
                 unit="MPa"
-                value={material.endurance_limit ?? ""}
+                value={materialDrafts.endurance_limit}
                 placeholder="Leave empty to estimate"
                 onChange={(value) =>
                   updateMaterialNumber("endurance_limit", value, true)
@@ -468,7 +603,7 @@ export default function MaterialForm({
               <NumericField
                 label="Elastic modulus"
                 unit="GPa"
-                value={material.elastic_modulus}
+                value={materialDrafts.elastic_modulus}
                 placeholder="e.g. 210"
                 onChange={(value) =>
                   updateMaterialNumber("elastic_modulus", value)
@@ -504,7 +639,7 @@ export default function MaterialForm({
                 <NumericField
                   label="Fatigue strength coefficient σf'"
                   unit="MPa"
-                  value={material.fatigue_strength_coefficient ?? ""}
+                  value={materialDrafts.fatigue_strength_coefficient}
                   placeholder="e.g. 900 MPa"
                   onChange={(value) =>
                     updateMaterialNumber(
@@ -516,7 +651,7 @@ export default function MaterialForm({
                 />
                 <NumericField
                   label="Basquin exponent b"
-                  value={material.fatigue_strength_exponent ?? ""}
+                  value={materialDrafts.fatigue_strength_exponent}
                   placeholder="e.g. -0.09"
                   onChange={(value) =>
                     updateMaterialNumber(
@@ -543,16 +678,16 @@ export default function MaterialForm({
               <NumericField
                 label="Maximum stress"
                 unit="MPa"
-                value={maxStress}
+                value={maxStressDraft}
                 placeholder="e.g. 300"
-                onChange={(value) => setMaxStress(Number(value) || 0)}
+                onChange={setMaxStressDraft}
               />
               <NumericField
                 label="Minimum stress"
                 unit="MPa"
-                value={minStress}
+                value={minStressDraft}
                 placeholder="e.g. -100"
-                onChange={(value) => setMinStress(Number(value) || 0)}
+                onChange={setMinStressDraft}
               />
             </div>
 
@@ -652,11 +787,9 @@ export default function MaterialForm({
                     ) : (
                       <NumericField
                         label="Manual surface factor k_a"
-                        value={manualSurfaceFactor}
+                        value={manualSurfaceFactorDraft}
                         placeholder="e.g. 0.85"
-                        onChange={(value) =>
-                          setManualSurfaceFactor(Number(value) || 0)
-                        }
+                        onChange={setManualSurfaceFactorDraft}
                       />
                     )}
                   </div>
@@ -669,19 +802,19 @@ export default function MaterialForm({
                   <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
                     <NumericField
                       label="Size factor k_b"
-                      value={marinFactors.size_factor}
+                      value={marinFactorDrafts.size_factor}
                       placeholder="e.g. 1.00"
                       onChange={(value) => updateMarinFactor("size_factor", value)}
                     />
                     <NumericField
                       label="Load factor k_c"
-                      value={marinFactors.load_factor}
+                      value={marinFactorDrafts.load_factor}
                       placeholder="e.g. 1.00"
                       onChange={(value) => updateMarinFactor("load_factor", value)}
                     />
                     <NumericField
                       label="Temperature factor k_d"
-                      value={marinFactors.temperature_factor}
+                      value={marinFactorDrafts.temperature_factor}
                       placeholder="e.g. 1.00"
                       onChange={(value) =>
                         updateMarinFactor("temperature_factor", value)
@@ -689,7 +822,7 @@ export default function MaterialForm({
                     />
                     <NumericField
                       label="Reliability factor k_e"
-                      value={marinFactors.reliability_factor}
+                      value={marinFactorDrafts.reliability_factor}
                       placeholder="e.g. 1.00"
                       onChange={(value) =>
                         updateMarinFactor("reliability_factor", value)
@@ -723,8 +856,10 @@ export default function MaterialForm({
                       <div className="space-y-1.5 md:col-span-2">
                         <Label>Notch model</Label>
                         <Select
-                          value={notch.model}
-                          onValueChange={(value) => updateNotch("model", value)}
+                          value={notchModel}
+                          onValueChange={(value) =>
+                            setNotchModel(value as NotchSensitivityInput["model"])
+                          }
                         >
                           <SelectTrigger>
                             <SelectValue />
@@ -739,14 +874,14 @@ export default function MaterialForm({
                       </div>
                       <NumericField
                         label="Theoretical concentration Kt"
-                        value={notch.kt}
+                        value={notchDrafts.kt}
                         placeholder="e.g. 2.2"
                         onChange={(value) => updateNotch("kt", value)}
                       />
                       <NumericField
                         label="Notch radius r"
                         unit="mm"
-                        value={notch.notch_radius_mm}
+                        value={notchDrafts.notch_radius_mm}
                         placeholder="e.g. 0.8"
                         onChange={(value) =>
                           updateNotch("notch_radius_mm", value)
@@ -755,7 +890,7 @@ export default function MaterialForm({
                       <NumericField
                         label="Notch constant a"
                         unit="mm"
-                        value={notch.notch_constant_mm}
+                        value={notchDrafts.notch_constant_mm}
                         placeholder="e.g. 0.25"
                         onChange={(value) =>
                           updateNotch("notch_constant_mm", value)
