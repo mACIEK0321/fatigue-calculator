@@ -88,10 +88,15 @@ class DeepSeekClient:
             ) from exc
         except httpx.HTTPStatusError as exc:
             status_code = exc.response.status_code
+            error_message = self._extract_error_message(exc.response)
             logger.warning("DeepSeek HTTP error status=%s", status_code)
             raise DeepSeekClientError(
                 code=AIComparisonErrorCode.http_error,
-                message=f"DeepSeek comparison failed with HTTP {status_code}.",
+                message=(
+                    f"DeepSeek comparison failed with HTTP {status_code}: {error_message}"
+                    if error_message
+                    else f"DeepSeek comparison failed with HTTP {status_code}."
+                ),
                 retriable=status_code >= 500,
             ) from exc
         except httpx.HTTPError as exc:
@@ -159,3 +164,21 @@ class DeepSeekClient:
             )
 
         return content.strip()
+
+    def _extract_error_message(self, response: httpx.Response) -> str | None:
+        try:
+            payload = response.json()
+        except Exception:
+            return None
+
+        error_payload = payload.get("error")
+        if isinstance(error_payload, dict):
+            message = error_payload.get("message")
+            if isinstance(message, str) and message.strip():
+                return message.strip()
+
+        detail = payload.get("detail")
+        if isinstance(detail, str) and detail.strip():
+            return detail.strip()
+
+        return None

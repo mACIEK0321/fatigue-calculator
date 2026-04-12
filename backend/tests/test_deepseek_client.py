@@ -198,6 +198,37 @@ def test_compare_fatigue_analysis_maps_timeout(monkeypatch: pytest.MonkeyPatch) 
     assert exc_info.value.retriable is True
 
 
+def test_compare_fatigue_analysis_includes_upstream_http_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = DeepSeekClient(build_settings())
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def __aenter__(self) -> "FakeAsyncClient":
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        async def post(self, *args, **kwargs) -> httpx.Response:
+            return httpx.Response(
+                402,
+                request=REQUEST,
+                json={"error": {"message": "Insufficient Balance"}},
+            )
+
+    monkeypatch.setattr("app.services.deepseek_client.httpx.AsyncClient", FakeAsyncClient)
+
+    with pytest.raises(DeepSeekClientError) as exc_info:
+        asyncio.run(client.compare_fatigue_analysis(build_comparison_input()))
+
+    assert exc_info.value.code == AIComparisonErrorCode.http_error
+    assert "Insufficient Balance" in exc_info.value.message
+
+
 def test_compare_fatigue_analysis_rejects_schema_mismatch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
