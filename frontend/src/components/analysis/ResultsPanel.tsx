@@ -68,6 +68,10 @@ export default function ResultsPanel({
   isLoading,
   showAIComparison,
 }: ResultsPanelProps) {
+  const aiResult = aiComparison?.status === "success" ? aiComparison.result : null;
+  const aiAssumptions = aiResult?.assumptions ?? [];
+  const aiWarnings = aiResult?.warnings ?? [];
+
   if (!results) {
     return (
       <Card className="border-slate-200 bg-white shadow-sm">
@@ -307,7 +311,7 @@ export default function ResultsPanel({
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {aiComparison?.status === "success" && aiComparison.result ? (
+            {aiComparison?.status === "success" && aiResult ? (
               <>
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
@@ -318,7 +322,7 @@ export default function ResultsPanel({
                       Native: {formatLife(results.selected_life)}
                     </p>
                     <p className="mt-1 text-sm text-slate-900">
-                      AI: {formatAIComparisonLife(aiComparison.result.life)}
+                      AI: {formatAIComparisonLife(aiResult.life)}
                     </p>
                   </div>
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
@@ -330,10 +334,10 @@ export default function ResultsPanel({
                     </p>
                     <p className="mt-1 text-sm text-slate-900">
                       AI:{" "}
-                      {aiComparison.result.safety_factor === null ||
-                      aiComparison.result.safety_factor === undefined
+                      {aiResult.safety_factor === null ||
+                      aiResult.safety_factor === undefined
                         ? "N/A"
-                        : aiComparison.result.safety_factor.toFixed(3)}
+                        : aiResult.safety_factor.toFixed(3)}
                     </p>
                   </div>
                 </div>
@@ -350,15 +354,15 @@ export default function ResultsPanel({
                     </p>
                     <p className="mt-1 text-sm text-slate-900">
                       AI:{" "}
-                      {aiComparison.result.basquin_parameters.sigma_f_prime !== null &&
-                      aiComparison.result.basquin_parameters.sigma_f_prime !== undefined &&
-                      aiComparison.result.basquin_parameters.b !== null &&
-                      aiComparison.result.basquin_parameters.b !== undefined
-                        ? `sigma_f' = ${aiComparison.result.basquin_parameters.sigma_f_prime.toFixed(1)} MPa, b = ${aiComparison.result.basquin_parameters.b.toFixed(4)}`
+                      {aiResult.basquin_parameters.sigma_f_prime !== null &&
+                      aiResult.basquin_parameters.sigma_f_prime !== undefined &&
+                      aiResult.basquin_parameters.b !== null &&
+                      aiResult.basquin_parameters.b !== undefined
+                        ? `sigma_f' = ${aiResult.basquin_parameters.sigma_f_prime.toFixed(1)} MPa, b = ${aiResult.basquin_parameters.b.toFixed(4)}`
                         : "N/A"}
                     </p>
                     <p className="mt-1 text-xs text-slate-500">
-                      Model: {aiComparison.result.raw_model_name}
+                      Model: {aiResult.raw_model_name}
                     </p>
                   </div>
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
@@ -366,7 +370,7 @@ export default function ResultsPanel({
                       AI summary
                     </p>
                     <p className="mt-2 text-sm text-slate-900">
-                      {aiComparison.result.summary}
+                      {aiResult.summary}
                     </p>
                   </div>
                 </div>
@@ -377,8 +381,8 @@ export default function ResultsPanel({
                       Assumptions
                     </p>
                     <div className="mt-2 space-y-1 text-sm text-slate-700">
-                      {aiComparison.result.assumptions.length > 0 ? (
-                        aiComparison.result.assumptions.map((assumption, index) => (
+                      {aiAssumptions.length > 0 ? (
+                        aiAssumptions.map((assumption, index) => (
                           <p key={`${assumption}-${index}`}>{assumption}</p>
                         ))
                       ) : (
@@ -391,8 +395,8 @@ export default function ResultsPanel({
                       Warnings
                     </p>
                     <div className="mt-2 space-y-1 text-sm text-slate-700">
-                      {aiComparison.result.warnings.length > 0 ? (
-                        aiComparison.result.warnings.map((warning, index) => (
+                      {aiWarnings.length > 0 ? (
+                        aiWarnings.map((warning, index) => (
                           <p key={`${warning}-${index}`}>{warning}</p>
                         ))
                       ) : (

@@ -564,8 +564,8 @@ class AIComparisonResult(BaseModel):
         default_factory=list,
         description="Explicit assumptions stated by the AI",
     )
-    interpreted_inputs: AIComparisonInterpretedInputs = Field(
-        ...,
+    interpreted_inputs: Optional[AIComparisonInterpretedInputs] = Field(
+        None,
         description="Structured echo of the input interpreted by the AI",
     )
     basquin_parameters: AIComparisonBasquinParameters = Field(
@@ -581,8 +581,8 @@ class AIComparisonResult(BaseModel):
         ...,
         description="AI-reported stress state",
     )
-    mean_stress_result: AIComparisonMeanStressResult = Field(
-        ...,
+    mean_stress_result: Optional[AIComparisonMeanStressResult] = Field(
+        None,
         description="AI-reported mean stress correction result",
     )
     life: AIComparisonLife = Field(
@@ -626,6 +626,14 @@ class AIComparisonMetadata(BaseModel):
         None,
         description="Groq response_format mode that produced the final response",
     )
+    schema_profile: str = Field(
+        "minimal_v1",
+        description="Identifier for the AI response schema profile used for this request",
+    )
+    schema_simplified: bool = Field(
+        True,
+        description="Whether the backend used the simplified AI response schema",
+    )
     attempted_response_formats: list[str] = Field(
         default_factory=list,
         description="Ordered response_format modes attempted for this comparison",
@@ -633,6 +641,10 @@ class AIComparisonMetadata(BaseModel):
     fallback_used: bool = Field(
         False,
         description="Whether the backend retried with a fallback response_format",
+    )
+    omitted_or_null_fields: list[str] = Field(
+        default_factory=list,
+        description="Top-level AI response fields that were omitted or explicitly returned as null",
     )
 
 

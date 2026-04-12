@@ -81,20 +81,6 @@ def valid_message_content() -> str:
     return """
     {
       "summary": "AI comparison summary",
-      "assumptions": ["Assume room temperature."],
-      "interpreted_inputs": {
-        "material_label": null,
-        "sn_curve_source": "material_basquin",
-        "surface_factor": 0.82,
-        "marin_factors": {
-          "size_factor": 1.0,
-          "load_factor": 1.0,
-          "temperature_factor": 1.0,
-          "reliability_factor": 1.0
-        },
-        "notch_correction_factor": null,
-        "loading_blocks_count": 0
-      },
       "basquin_parameters": {
         "sigma_f_prime": 1050.0,
         "b": -0.09,
@@ -108,20 +94,12 @@ def valid_message_content() -> str:
         "stress_amplitude": 150.0,
         "stress_ratio": -0.667
       },
-      "mean_stress_result": {
-        "model_name": "goodman",
-        "effective_mean_stress": 30.0,
-        "equivalent_alternating_stress": 158.3,
-        "is_safe": true
-      },
       "life": {
         "status": "finite",
         "cycles": 2200000.0,
         "reason": "Computed from Basquin response."
       },
       "safety_factor": 1.12,
-      "sn_curve_points": [[10000.0, 390.0], [1000000.0, 240.0]],
-      "goodman_or_haigh_points": [[0.0, 229.6], [400.0, 0.0]],
       "warnings": [],
       "raw_model_name": "openai/gpt-oss-20b"
     }
@@ -179,7 +157,7 @@ def test_build_chat_payload_uses_json_schema_contract() -> None:
     assert payload["response_format"]["json_schema"]["strict"] is True
     assert payload["response_format"]["json_schema"]["schema"]["additionalProperties"] is False
     assert payload["messages"][0]["role"] == "system"
-    assert "structured JSON response" in payload["messages"][0]["content"]
+    assert "Return exactly one valid JSON object." in payload["messages"][0]["content"]
     assert "raw_model_name" in payload["messages"][1]["content"]
 
 
@@ -198,8 +176,8 @@ def test_build_chat_payload_supports_json_object_mode() -> None:
     payload = client.build_chat_payload(build_comparison_input(), response_format="json_object")
 
     assert payload["response_format"] == {"type": "json_object"}
-    assert "single valid JSON object" in payload["messages"][0]["content"]
-    assert "Return exactly one JSON object and nothing else." in payload["messages"][1]["content"]
+    assert "first character must be '{'" in payload["messages"][0]["content"]
+    assert "Reply with JSON only." in payload["messages"][1]["content"]
 
 
 def test_compare_fatigue_analysis_parses_valid_json_schema_response(
@@ -217,10 +195,21 @@ def test_compare_fatigue_analysis_parses_valid_json_schema_response(
 
     assert result.result.summary == "AI comparison summary"
     assert result.result.life.cycles == 2200000.0
-    assert result.result.sn_curve_points[0] == (10000.0, 390.0)
+    assert result.result.sn_curve_points == []
+    assert result.result.interpreted_inputs is None
+    assert result.result.mean_stress_result is None
     assert result.metadata.response_format == "json_schema"
+    assert result.metadata.schema_profile == "minimal_v1"
+    assert result.metadata.schema_simplified is True
     assert result.metadata.attempted_response_formats == ["json_schema"]
     assert result.metadata.fallback_used is False
+    assert result.metadata.omitted_or_null_fields == [
+        "assumptions",
+        "interpreted_inputs",
+        "mean_stress_result",
+        "sn_curve_points",
+        "goodman_or_haigh_points",
+    ]
     assert captured_payloads[0]["response_format"]["type"] == "json_schema"
 
 
@@ -253,6 +242,31 @@ def test_compare_fatigue_analysis_falls_back_to_json_object_on_unsupported_json_
     assert result.metadata.attempted_response_formats == ["json_schema", "json_object"]
     assert result.metadata.fallback_used is True
     assert captured_payloads[0]["response_format"]["type"] == "json_schema"
+    assert captured_payloads[1]["response_format"]["type"] == "json_object"
+
+
+def test_compare_fatigue_analysis_falls_back_to_json_object_on_provider_json_validation_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = GroqClient(build_settings())
+    captured_payloads: list[dict] = []
+    install_fake_async_client(
+        monkeypatch,
+        responses=[
+            httpx.Response(
+                400,
+                request=REQUEST,
+                json={"error": {"message": "Failed to validate JSON. Please adjust your prompt."}},
+            ),
+            build_completion_response(valid_message_content()),
+        ],
+        captured_payloads=captured_payloads,
+    )
+
+    result = asyncio.run(client.compare_fatigue_analysis(build_comparison_input()))
+
+    assert result.metadata.response_format == "json_object"
+    assert result.metadata.fallback_used is True
     assert captured_payloads[1]["response_format"]["type"] == "json_object"
 
 

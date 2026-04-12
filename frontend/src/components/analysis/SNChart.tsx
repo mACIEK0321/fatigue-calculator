@@ -68,7 +68,7 @@ export default function SNChart({
     : [];
   const aiCurve =
     aiComparison?.status === "success" && aiComparison.result
-      ? aiComparison.result.sn_curve_points.map(([cycles, stress]) => ({
+      ? (aiComparison.result.sn_curve_points ?? []).map(([cycles, stress]) => ({
           cycles,
           stress,
         }))

@@ -7,14 +7,22 @@ from typing import Literal
 
 GroqResponseFormat = Literal["json_schema", "json_object"]
 
+GROQ_SCHEMA_PROFILE = "minimal_v1"
+_OPTIONAL_TOP_LEVEL_FIELDS = (
+    "assumptions",
+    "interpreted_inputs",
+    "mean_stress_result",
+    "sn_curve_points",
+    "goodman_or_haigh_points",
+)
+
 _GROQ_SYSTEM_PROMPT_BASE = """You are a fatigue-analysis comparison engine.
-Return a structured JSON response that matches the supplied schema exactly.
+Return exactly one valid JSON object.
 Do not add markdown.
 Do not add code fences.
-Do not add commentary before or after the JSON.
-Prefer quantitative values over qualitative wording.
-If a value cannot be derived confidently, use null and explain the gap in warnings.
-Keep chart point collections numeric and consistent with the provided input flags.
+Do not add any text before or after the JSON.
+Use only the allowed keys.
+Use null when a value cannot be derived reliably.
 """
 
 _POINT_PAIR_SCHEMA = {
@@ -29,24 +37,19 @@ GROQ_RESPONSE_JSON_SCHEMA: dict = {
     "additionalProperties": False,
     "required": [
         "summary",
-        "assumptions",
-        "interpreted_inputs",
         "basquin_parameters",
         "modified_endurance_limit",
         "stress_state",
-        "mean_stress_result",
         "life",
         "safety_factor",
-        "sn_curve_points",
-        "goodman_or_haigh_points",
         "warnings",
         "raw_model_name",
     ],
     "properties": {
         "summary": {"type": "string"},
-        "assumptions": {"type": "array", "items": {"type": "string"}},
+        "assumptions": {"type": ["array", "null"], "items": {"type": "string"}},
         "interpreted_inputs": {
-            "type": "object",
+            "type": ["object", "null"],
             "additionalProperties": False,
             "required": [
                 "material_label",
@@ -110,7 +113,7 @@ GROQ_RESPONSE_JSON_SCHEMA: dict = {
             },
         },
         "mean_stress_result": {
-            "type": "object",
+            "type": ["object", "null"],
             "additionalProperties": False,
             "required": [
                 "model_name",
@@ -142,8 +145,14 @@ GROQ_RESPONSE_JSON_SCHEMA: dict = {
             },
         },
         "safety_factor": {"type": ["number", "null"]},
-        "sn_curve_points": {"type": "array", "items": _POINT_PAIR_SCHEMA},
-        "goodman_or_haigh_points": {"type": "array", "items": _POINT_PAIR_SCHEMA},
+        "sn_curve_points": {
+            "type": ["array", "null"],
+            "items": _POINT_PAIR_SCHEMA,
+        },
+        "goodman_or_haigh_points": {
+            "type": ["array", "null"],
+            "items": _POINT_PAIR_SCHEMA,
+        },
         "warnings": {"type": "array", "items": {"type": "string"}},
         "raw_model_name": {"type": "string"},
     },
@@ -155,7 +164,6 @@ def build_groq_system_prompt(response_format: GroqResponseFormat) -> str:
     if response_format == "json_object":
         return (
             _GROQ_SYSTEM_PROMPT_BASE
-            + "Your entire reply must be a single valid JSON object. "
             + "The first character must be '{' and the last character must be '}'."
         )
 
@@ -169,32 +177,37 @@ def build_groq_user_prompt(
     model_name: str,
 ) -> str:
     """Build the user prompt aligned with the selected Groq response format."""
-    normalized_payload = json.dumps(payload, ensure_ascii=True, indent=2)
+    normalized_payload = json.dumps(payload, ensure_ascii=True, separators=(",", ":"))
+    allowed_keys = ",".join(
+        [
+            "summary",
+            "basquin_parameters",
+            "modified_endurance_limit",
+            "stress_state",
+            "life",
+            "safety_factor",
+            "warnings",
+            "raw_model_name",
+        ]
+    )
+    optional_keys = ",".join(_OPTIONAL_TOP_LEVEL_FIELDS)
 
     instructions = (
-        "Analyze the following normalized fatigue input.\n"
-        "Return only data that fits the required output structure.\n"
-        "Requirements:\n"
-        "1. Use the exact keys required by the schema.\n"
-        "2. Keep `sn_curve_points` as numeric [cycles, stress] pairs.\n"
-        "3. Keep `goodman_or_haigh_points` as numeric [mean_stress, stress_amplitude] pairs.\n"
-        "4. Always include explicit assumptions and warnings arrays.\n"
-        "5. Prefer numbers over narrative language.\n"
-        "6. Respect the requested point limit in the input flags.\n"
-        f"7. Set `raw_model_name` to `{model_name}` exactly.\n"
+        "Return one JSON object only.\n"
+        f"Required keys: {allowed_keys}.\n"
+        f"Optional keys: {optional_keys}.\n"
+        "Do not output markdown.\n"
+        "Do not output any extra keys.\n"
+        "If a value is uncertain, return null for that field.\n"
+        f'Set "raw_model_name" to "{model_name}" exactly.\n'
     )
 
     if response_format == "json_object":
-        instructions += (
-            "8. Return exactly one JSON object and nothing else.\n"
-            "9. Do not wrap the JSON in markdown or quotes.\n"
-            "10. Every required field must be present. Use null only where the schema allows null.\n\n"
-        )
-    else:
-        instructions += "\n"
+        instructions += "Reply with JSON only.\n"
 
-    return (
-        instructions
-        + "\n"
-        f"Normalized fatigue input:\n{normalized_payload}"
-    )
+    return f"{instructions}Input:{normalized_payload}"
+
+
+def get_optional_top_level_fields() -> tuple[str, ...]:
+    """Return optional top-level fields used by the simplified schema."""
+    return _OPTIONAL_TOP_LEVEL_FIELDS

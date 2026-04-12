@@ -264,16 +264,16 @@ export type AIComparisonPoint = [number, number];
 
 export interface AIComparisonResult {
   summary: string;
-  assumptions: string[];
-  interpreted_inputs: AIComparisonInterpretedInputs;
+  assumptions?: string[] | null;
+  interpreted_inputs?: AIComparisonInterpretedInputs | null;
   basquin_parameters: AIComparisonBasquinParameters;
   modified_endurance_limit?: number | null;
   stress_state: AIComparisonStressState;
-  mean_stress_result: AIComparisonMeanStressResult;
+  mean_stress_result?: AIComparisonMeanStressResult | null;
   life: AIComparisonLife;
   safety_factor?: number | null;
-  sn_curve_points: AIComparisonPoint[];
-  goodman_or_haigh_points: AIComparisonPoint[];
+  sn_curve_points?: AIComparisonPoint[] | null;
+  goodman_or_haigh_points?: AIComparisonPoint[] | null;
   warnings: string[];
   raw_model_name: string;
 }
@@ -286,8 +286,11 @@ export interface AIComparisonError {
 
 export interface AIComparisonMetadata {
   response_format?: string | null;
+  schema_profile: string;
+  schema_simplified: boolean;
   attempted_response_formats: string[];
   fallback_used: boolean;
+  omitted_or_null_fields: string[];
 }
 
 export interface AIComparisonEnvelope {

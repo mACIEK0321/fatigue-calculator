@@ -436,4 +436,139 @@ describe("ResultsPanel", () => {
 
     expect(markup).toContain("AI comparison requested.");
   });
+
+  it("renders a simplified AI comparison payload without optional sections", () => {
+    const results: FatigueAnalysisResponse = {
+      stress_state: {
+        input_max_stress: 220,
+        input_min_stress: -60,
+        corrected_max_stress: 220,
+        corrected_min_stress: -60,
+        stress_amplitude: 140,
+        mean_stress: 80,
+        stress_ratio: -0.2727272727,
+      },
+      modified_endurance_limit: 230,
+      sn_curve_source: {
+        mode: "material_basquin",
+        basquin_parameters: {
+          sigma_f_prime: 980,
+          b: -0.095,
+          source: "material_defaults",
+        },
+        basquin_fit: null,
+      },
+      cycles_to_failure: {
+        goodman: { status: "finite", cycles: 900000, reason: "finite" },
+        gerber: { status: "finite", cycles: 950000, reason: "finite" },
+        soderberg: { status: "finite", cycles: 780000, reason: "finite" },
+        morrow: { status: "finite", cycles: 870000, reason: "finite" },
+      },
+      mean_stress_corrections: [
+        {
+          model_name: "goodman",
+          effective_mean_stress: 80,
+          safety_factor: 1.02,
+          equivalent_alternating_stress: 225,
+          is_safe: true,
+          life: {
+            status: "finite",
+            cycles: 900000,
+            reason: "finite",
+          },
+        },
+      ],
+      selected_mean_stress_model: "goodman",
+      selected_mean_stress_result: {
+        model_name: "goodman",
+        effective_mean_stress: 80,
+        safety_factor: 1.02,
+        equivalent_alternating_stress: 225,
+        is_safe: true,
+        life: {
+          status: "finite",
+          cycles: 900000,
+          reason: "finite",
+        },
+      },
+      selected_life: {
+        status: "finite",
+        cycles: 900000,
+        reason: "finite",
+      },
+      sn_chart: {
+        curve: [{ cycles: 1e4, stress: 400 }],
+        endurance_limit: 230,
+        selected_point: null,
+      },
+      haigh_diagram: {
+        goodman_envelope: [],
+        gerber_envelope: [],
+        soderberg_envelope: [],
+        morrow_envelope: [],
+        operating_point: { mean_stress: 80, stress_amplitude: 140 },
+        corrected_operating_point: null,
+      },
+      notch_result: null,
+      miner_damage: null,
+    };
+    const aiComparison: AIComparisonEnvelope = {
+      provider: "groq",
+      enabled: true,
+      status: "success",
+      result: {
+        summary: "Minimal AI summary",
+        basquin_parameters: {
+          sigma_f_prime: 990,
+          b: -0.096,
+          source: "material_defaults",
+        },
+        modified_endurance_limit: 231,
+        stress_state: {
+          max_stress: 220,
+          min_stress: -60,
+          mean_stress: 80,
+          stress_amplitude: 140,
+          stress_ratio: -0.2727272727,
+        },
+        life: {
+          status: "finite",
+          cycles: 880000,
+          reason: "finite",
+        },
+        safety_factor: 1.01,
+        warnings: [],
+        raw_model_name: "openai/gpt-oss-20b",
+      },
+      error: null,
+      metadata: {
+        response_format: "json_schema",
+        schema_profile: "minimal_v1",
+        schema_simplified: true,
+        attempted_response_formats: ["json_schema"],
+        fallback_used: false,
+        omitted_or_null_fields: [
+          "assumptions",
+          "interpreted_inputs",
+          "mean_stress_result",
+          "sn_curve_points",
+          "goodman_or_haigh_points",
+        ],
+      },
+    };
+
+    const markup = renderToStaticMarkup(
+      <ResultsPanel
+        results={results}
+        aiComparison={aiComparison}
+        isLoading={false}
+        showAIComparison={true}
+      />
+    );
+
+    expect(markup).toContain("Minimal AI summary");
+    expect(markup).toContain("AI: 880.0k cycles");
+    expect(markup).toContain("No explicit assumptions returned.");
+    expect(markup).toContain("No AI warnings returned.");
+  });
 });

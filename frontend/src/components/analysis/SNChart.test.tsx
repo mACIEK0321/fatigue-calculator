@@ -124,4 +124,73 @@ describe("SNChart", () => {
     expect(markup).toContain("Active S-N curve");
     expect(markup).toContain("AI S-N curve:2");
   });
+
+  it("does not render an AI series when the simplified payload omits AI curve points", () => {
+    const chartData: SNChartData = {
+      curve: [
+        { cycles: 1e4, stress: 420 },
+        { cycles: 1e6, stress: 245 },
+      ],
+      endurance_limit: 240,
+      selected_point: null,
+    };
+    const curveSource: SNCurveSourceResult = {
+      mode: "material_basquin",
+      basquin_parameters: {
+        sigma_f_prime: 1337.5,
+        b: -0.117,
+        source: "material_defaults",
+      },
+      basquin_fit: null,
+    };
+    const aiComparison: AIComparisonEnvelope = {
+      provider: "groq",
+      enabled: true,
+      status: "success",
+      result: {
+        summary: "Minimal AI summary",
+        basquin_parameters: {
+          sigma_f_prime: 1340,
+          b: -0.118,
+          source: "material_defaults",
+        },
+        modified_endurance_limit: 242,
+        stress_state: {
+          max_stress: 280,
+          min_stress: -40,
+          mean_stress: 120,
+          stress_amplitude: 160,
+          stress_ratio: -0.1428571429,
+        },
+        life: {
+          status: "finite",
+          cycles: 700000,
+          reason: "finite",
+        },
+        safety_factor: 0.91,
+        warnings: [],
+        raw_model_name: "openai/gpt-oss-20b",
+      },
+      error: null,
+      metadata: {
+        response_format: "json_schema",
+        schema_profile: "minimal_v1",
+        schema_simplified: true,
+        attempted_response_formats: ["json_schema"],
+        fallback_used: false,
+        omitted_or_null_fields: ["sn_curve_points"],
+      },
+    };
+
+    const markup = renderToStaticMarkup(
+      <SNChart
+        chartData={chartData}
+        curveSource={curveSource}
+        aiComparison={aiComparison}
+      />
+    );
+
+    expect(markup).toContain("Active S-N curve");
+    expect(markup).not.toContain("AI S-N curve");
+  });
 });

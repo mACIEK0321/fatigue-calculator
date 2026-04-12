@@ -17,9 +17,11 @@ from app.models.schemas import (
 )
 from app.services.groq_prompt import (
     GROQ_RESPONSE_JSON_SCHEMA,
+    GROQ_SCHEMA_PROFILE,
     GroqResponseFormat,
     build_groq_system_prompt,
     build_groq_user_prompt,
+    get_optional_top_level_fields,
 )
 
 logger = logging.getLogger(__name__)
@@ -111,17 +113,18 @@ class GroqClient:
                     payload,
                     response_format=response_format,
                 )
-                result = self._validate_response_payload(response_payload)
+                result, omitted_or_null_fields = self._validate_response_payload(
+                    response_payload
+                )
             except GroqClientError as exc:
                 if (
-                    exc.should_fallback
-                    and response_format == "json_schema"
-                    and index + 1 < len(response_formats)
-                    and response_formats[index + 1] == "json_object"
+                    self._should_try_fallback(exc, response_format, response_formats, index)
                 ):
                     logger.info(
-                        "Groq model=%s does not support json_schema; retrying with json_object",
+                        "Groq model=%s retrying response_format=%s -> json_object after code=%s",
                         self._settings.GROQ_MODEL,
+                        response_format,
+                        exc.code.value,
                     )
                     continue
 
@@ -136,6 +139,7 @@ class GroqClient:
                 metadata=self._build_metadata(
                     attempted_response_formats,
                     response_format=response_format,
+                    omitted_or_null_fields=omitted_or_null_fields,
                 ),
             )
 
@@ -193,9 +197,9 @@ class GroqClient:
         except httpx.HTTPStatusError as exc:
             status_code = exc.response.status_code
             error_message = self._extract_error_message(exc.response)
-            should_fallback = (
-                response_format == "json_schema"
-                and self._is_unsupported_json_schema_error(status_code, error_message)
+            should_fallback = response_format == "json_schema" and (
+                self._is_unsupported_json_schema_error(status_code, error_message)
+                or self._is_provider_json_validation_error(status_code, error_message)
             )
             logger.warning(
                 "Groq HTTP error status=%s response_format=%s",
@@ -228,7 +232,10 @@ class GroqClient:
                 retriable=False,
             ) from exc
 
-    def _validate_response_payload(self, response_payload: dict) -> AIComparisonResult:
+    def _validate_response_payload(
+        self,
+        response_payload: dict,
+    ) -> tuple[AIComparisonResult, list[str]]:
         content = self._extract_message_content(response_payload)
         try:
             parsed_content = json.loads(content)
@@ -239,14 +246,17 @@ class GroqClient:
                 retriable=False,
             ) from exc
 
+        omitted_or_null_fields = self._collect_omitted_or_null_fields(parsed_content)
+
         try:
-            return AIComparisonResult.model_validate(parsed_content)
+            return AIComparisonResult.model_validate(parsed_content), omitted_or_null_fields
         except ValidationError as exc:
             logger.warning("Groq schema validation failed: %s", exc)
             raise GroqClientError(
                 code=AIComparisonErrorCode.schema_validation,
                 message="The AI provider returned JSON that did not match the expected schema.",
                 retriable=False,
+                should_fallback=True,
             ) from exc
 
     def _build_metadata(
@@ -254,11 +264,15 @@ class GroqClient:
         attempted_response_formats: list[str],
         *,
         response_format: str,
+        omitted_or_null_fields: list[str],
     ) -> AIComparisonMetadata:
         return AIComparisonMetadata(
             response_format=response_format,
+            schema_profile=GROQ_SCHEMA_PROFILE,
+            schema_simplified=True,
             attempted_response_formats=attempted_response_formats,
             fallback_used=len(attempted_response_formats) > 1,
+            omitted_or_null_fields=omitted_or_null_fields,
         )
 
     def _attach_attempt_diagnostics(
@@ -276,6 +290,20 @@ class GroqClient:
             response_format=response_format,
             attempted_response_formats=tuple(attempted_response_formats),
             fallback_used=len(attempted_response_formats) > 1,
+        )
+
+    def _should_try_fallback(
+        self,
+        exc: GroqClientError,
+        response_format: str,
+        response_formats: tuple[GroqResponseFormat, ...],
+        index: int,
+    ) -> bool:
+        return (
+            exc.should_fallback
+            and response_format == "json_schema"
+            and index + 1 < len(response_formats)
+            and response_formats[index + 1] == "json_object"
         )
 
     def _is_unsupported_json_schema_error(
@@ -296,6 +324,28 @@ class GroqClient:
                 or "unsupported" in normalized_message
             )
         )
+
+    def _is_provider_json_validation_error(
+        self,
+        status_code: int,
+        error_message: str | None,
+    ) -> bool:
+        if status_code != 400 or not error_message:
+            return False
+
+        normalized_message = error_message.lower()
+        return "failed to validate json" in normalized_message
+
+    def _collect_omitted_or_null_fields(self, parsed_content: object) -> list[str]:
+        if not isinstance(parsed_content, dict):
+            return list(get_optional_top_level_fields())
+
+        omitted_or_null_fields: list[str] = []
+        for field_name in get_optional_top_level_fields():
+            if field_name not in parsed_content or parsed_content[field_name] is None:
+                omitted_or_null_fields.append(field_name)
+
+        return omitted_or_null_fields
 
     def _extract_message_content(self, response_payload: dict) -> str:
         try:
