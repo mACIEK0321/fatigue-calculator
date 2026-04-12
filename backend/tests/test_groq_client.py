@@ -10,6 +10,12 @@ import pytest
 from app.core.config import Settings
 from app.models.schemas import AIComparisonErrorCode
 from app.services.groq_client import GroqClient, GroqClientError
+from app.services.groq_prompt import (
+    GROQ_DEFAULT_SCHEMA_PROFILE,
+    GROQ_FALLBACK_SCHEMA_PROFILE,
+    GROQ_FULL_RESPONSE_JSON_SCHEMA,
+    GROQ_MINIMAL_RESPONSE_JSON_SCHEMA,
+)
 
 REQUEST = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
 
@@ -77,7 +83,58 @@ def build_comparison_input() -> dict:
     }
 
 
-def valid_message_content() -> str:
+def valid_full_message_content() -> str:
+    return """
+    {
+      "summary": "AI comparison summary",
+      "assumptions": [],
+      "interpreted_inputs": {
+        "material_label": null,
+        "sn_curve_source": "material_basquin",
+        "surface_factor": 0.82,
+        "marin_factors": {
+          "size_factor": 1.0,
+          "load_factor": 1.0,
+          "temperature_factor": 1.0,
+          "reliability_factor": 1.0
+        },
+        "notch_correction_factor": null,
+        "loading_blocks_count": 0
+      },
+      "basquin_parameters": {
+        "sigma_f_prime": 1050.0,
+        "b": -0.09,
+        "source": "material_default_from_uts"
+      },
+      "modified_endurance_limit": 229.6,
+      "stress_state": {
+        "max_stress": 180.0,
+        "min_stress": -120.0,
+        "mean_stress": 30.0,
+        "stress_amplitude": 150.0,
+        "stress_ratio": -0.667
+      },
+      "mean_stress_result": {
+        "model_name": "goodman",
+        "effective_mean_stress": 30.0,
+        "equivalent_alternating_stress": 158.3,
+        "is_safe": true
+      },
+      "life": {
+        "status": "finite",
+        "cycles": 2200000.0,
+        "reason": "Computed from Basquin response."
+      },
+      "safety_factor": 1.12,
+      "sn_curve_points": [[10000.0, 390.0], [1000000.0, 240.0]],
+      "goodman_or_haigh_points": [[0.0, 229.6], [400.0, 0.0]],
+      "warnings": [],
+      "raw_model_name": "openai/gpt-oss-20b"
+    }
+    """
+
+
+def valid_minimal_message_content() -> str:
     return """
     {
       "summary": "AI comparison summary",
@@ -147,7 +204,33 @@ def install_fake_async_client(
     monkeypatch.setattr("app.services.groq_client.httpx.AsyncClient", FakeAsyncClient)
 
 
-def test_build_chat_payload_uses_json_schema_contract() -> None:
+def assert_object_schema_is_groq_strict(schema: dict) -> None:
+    schema_type = schema.get("type")
+    normalized_types = schema_type if isinstance(schema_type, list) else [schema_type]
+
+    if "object" in normalized_types:
+        properties = schema["properties"]
+        assert schema["additionalProperties"] is False
+        assert sorted(schema["required"]) == sorted(properties.keys())
+        for property_schema in properties.values():
+            if isinstance(property_schema, dict):
+                assert_object_schema_is_groq_strict(property_schema)
+
+    if "array" in normalized_types:
+        items = schema.get("items")
+        if isinstance(items, dict):
+            assert_object_schema_is_groq_strict(items)
+
+
+def test_full_response_schema_is_valid_for_groq_strict_mode() -> None:
+    assert_object_schema_is_groq_strict(GROQ_FULL_RESPONSE_JSON_SCHEMA)
+
+
+def test_minimal_response_schema_is_valid_for_groq_strict_mode() -> None:
+    assert_object_schema_is_groq_strict(GROQ_MINIMAL_RESPONSE_JSON_SCHEMA)
+
+
+def test_build_chat_payload_uses_full_json_schema_contract() -> None:
     client = GroqClient(build_settings())
 
     payload = client.build_chat_payload(build_comparison_input(), response_format="json_schema")
@@ -155,9 +238,9 @@ def test_build_chat_payload_uses_json_schema_contract() -> None:
     assert payload["model"] == "openai/gpt-oss-20b"
     assert payload["response_format"]["type"] == "json_schema"
     assert payload["response_format"]["json_schema"]["strict"] is True
-    assert payload["response_format"]["json_schema"]["schema"]["additionalProperties"] is False
+    assert payload["response_format"]["json_schema"]["schema"] == GROQ_FULL_RESPONSE_JSON_SCHEMA
     assert payload["messages"][0]["role"] == "system"
-    assert "Return exactly one valid JSON object." in payload["messages"][0]["content"]
+    assert "Every listed key must be present." in payload["messages"][1]["content"]
     assert "raw_model_name" in payload["messages"][1]["content"]
 
 
@@ -170,24 +253,24 @@ def test_build_chat_payload_disables_strict_for_non_strict_models() -> None:
     assert payload["response_format"]["json_schema"]["strict"] is False
 
 
-def test_build_chat_payload_supports_json_object_mode() -> None:
+def test_build_chat_payload_supports_json_object_mode_with_minimal_profile() -> None:
     client = GroqClient(build_settings(response_format="json_object"))
 
     payload = client.build_chat_payload(build_comparison_input(), response_format="json_object")
 
     assert payload["response_format"] == {"type": "json_object"}
     assert "first character must be '{'" in payload["messages"][0]["content"]
-    assert "Reply with JSON only." in payload["messages"][1]["content"]
+    assert "Keep the response minimal." in payload["messages"][1]["content"]
 
 
-def test_compare_fatigue_analysis_parses_valid_json_schema_response(
+def test_compare_fatigue_analysis_parses_valid_full_json_schema_response(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = GroqClient(build_settings())
     captured_payloads: list[dict] = []
     install_fake_async_client(
         monkeypatch,
-        responses=[build_completion_response(valid_message_content())],
+        responses=[build_completion_response(valid_full_message_content())],
         captured_payloads=captured_payloads,
     )
 
@@ -195,21 +278,15 @@ def test_compare_fatigue_analysis_parses_valid_json_schema_response(
 
     assert result.result.summary == "AI comparison summary"
     assert result.result.life.cycles == 2200000.0
-    assert result.result.sn_curve_points == []
-    assert result.result.interpreted_inputs is None
-    assert result.result.mean_stress_result is None
+    assert result.result.sn_curve_points[0] == (10000.0, 390.0)
+    assert result.result.interpreted_inputs is not None
+    assert result.result.mean_stress_result is not None
     assert result.metadata.response_format == "json_schema"
-    assert result.metadata.schema_profile == "minimal_v1"
-    assert result.metadata.schema_simplified is True
+    assert result.metadata.schema_profile == GROQ_DEFAULT_SCHEMA_PROFILE
+    assert result.metadata.schema_simplified is False
     assert result.metadata.attempted_response_formats == ["json_schema"]
     assert result.metadata.fallback_used is False
-    assert result.metadata.omitted_or_null_fields == [
-        "assumptions",
-        "interpreted_inputs",
-        "mean_stress_result",
-        "sn_curve_points",
-        "goodman_or_haigh_points",
-    ]
+    assert result.metadata.omitted_or_null_fields == []
     assert captured_payloads[0]["response_format"]["type"] == "json_schema"
 
 
@@ -230,7 +307,7 @@ def test_compare_fatigue_analysis_falls_back_to_json_object_on_unsupported_json_
                     }
                 },
             ),
-            build_completion_response(valid_message_content()),
+            build_completion_response(valid_minimal_message_content()),
         ],
         captured_payloads=captured_payloads,
     )
@@ -239,8 +316,11 @@ def test_compare_fatigue_analysis_falls_back_to_json_object_on_unsupported_json_
 
     assert result.result.summary == "AI comparison summary"
     assert result.metadata.response_format == "json_object"
+    assert result.metadata.schema_profile == GROQ_FALLBACK_SCHEMA_PROFILE
+    assert result.metadata.schema_simplified is True
     assert result.metadata.attempted_response_formats == ["json_schema", "json_object"]
     assert result.metadata.fallback_used is True
+    assert "assumptions" in result.metadata.omitted_or_null_fields
     assert captured_payloads[0]["response_format"]["type"] == "json_schema"
     assert captured_payloads[1]["response_format"]["type"] == "json_object"
 
@@ -258,7 +338,7 @@ def test_compare_fatigue_analysis_falls_back_to_json_object_on_provider_json_val
                 request=REQUEST,
                 json={"error": {"message": "Failed to validate JSON. Please adjust your prompt."}},
             ),
-            build_completion_response(valid_message_content()),
+            build_completion_response(valid_minimal_message_content()),
         ],
         captured_payloads=captured_payloads,
     )
@@ -266,6 +346,7 @@ def test_compare_fatigue_analysis_falls_back_to_json_object_on_provider_json_val
     result = asyncio.run(client.compare_fatigue_analysis(build_comparison_input()))
 
     assert result.metadata.response_format == "json_object"
+    assert result.metadata.schema_profile == GROQ_FALLBACK_SCHEMA_PROFILE
     assert result.metadata.fallback_used is True
     assert captured_payloads[1]["response_format"]["type"] == "json_object"
 
@@ -298,6 +379,7 @@ def test_compare_fatigue_analysis_validates_fallback_json_object_response(
     assert exc_info.value.code == AIComparisonErrorCode.schema_validation
     assert exc_info.value.attempted_response_formats == ("json_schema", "json_object")
     assert exc_info.value.response_format == "json_object"
+    assert exc_info.value.schema_profile == GROQ_FALLBACK_SCHEMA_PROFILE
     assert exc_info.value.fallback_used is True
     assert captured_payloads[1]["response_format"]["type"] == "json_object"
 
@@ -330,6 +412,7 @@ def test_compare_fatigue_analysis_rejects_invalid_json_content_after_fallback(
     assert exc_info.value.code == AIComparisonErrorCode.invalid_json
     assert exc_info.value.attempted_response_formats == ("json_schema", "json_object")
     assert exc_info.value.response_format == "json_object"
+    assert exc_info.value.schema_profile == GROQ_FALLBACK_SCHEMA_PROFILE
     assert exc_info.value.fallback_used is True
     assert captured_payloads[1]["response_format"]["type"] == "json_object"
 
@@ -348,6 +431,7 @@ def test_compare_fatigue_analysis_maps_timeout(monkeypatch: pytest.MonkeyPatch) 
 
     assert exc_info.value.code == AIComparisonErrorCode.timeout
     assert exc_info.value.retriable is True
+    assert exc_info.value.schema_profile == GROQ_DEFAULT_SCHEMA_PROFILE
     assert exc_info.value.attempted_response_formats == ("json_schema",)
 
 
@@ -373,6 +457,7 @@ def test_compare_fatigue_analysis_includes_upstream_http_message(
 
     assert exc_info.value.code == AIComparisonErrorCode.http_error
     assert "Insufficient Credits" in exc_info.value.message
+    assert exc_info.value.schema_profile == GROQ_DEFAULT_SCHEMA_PROFILE
     assert exc_info.value.attempted_response_formats == ("json_schema",)
 
 
@@ -391,5 +476,6 @@ def test_compare_fatigue_analysis_rejects_invalid_json_content(
         asyncio.run(client.compare_fatigue_analysis(build_comparison_input()))
 
     assert exc_info.value.code == AIComparisonErrorCode.invalid_json
+    assert exc_info.value.schema_profile == GROQ_FALLBACK_SCHEMA_PROFILE
     assert exc_info.value.attempted_response_formats == ("json_object",)
     assert captured_payloads[0]["response_format"]["type"] == "json_object"

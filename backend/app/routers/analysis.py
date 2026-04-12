@@ -227,6 +227,8 @@ async def _run_ai_comparison(
             status="error",
             metadata=AIComparisonMetadata(
                 response_format=exc.response_format,
+                schema_profile=exc.schema_profile or AIComparisonMetadata().schema_profile,
+                schema_simplified=exc.schema_simplified,
                 attempted_response_formats=list(exc.attempted_response_formats),
                 fallback_used=exc.fallback_used,
             ).model_dump(),

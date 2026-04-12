@@ -627,11 +627,11 @@ class AIComparisonMetadata(BaseModel):
         description="Groq response_format mode that produced the final response",
     )
     schema_profile: str = Field(
-        "minimal_v1",
+        "full_v1",
         description="Identifier for the AI response schema profile used for this request",
     )
     schema_simplified: bool = Field(
-        True,
+        False,
         description="Whether the backend used the simplified AI response schema",
     )
     attempted_response_formats: list[str] = Field(

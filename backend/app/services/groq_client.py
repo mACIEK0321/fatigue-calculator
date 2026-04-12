@@ -16,12 +16,15 @@ from app.models.schemas import (
     AIComparisonResult,
 )
 from app.services.groq_prompt import (
-    GROQ_RESPONSE_JSON_SCHEMA,
-    GROQ_SCHEMA_PROFILE,
+    GROQ_DEFAULT_SCHEMA_PROFILE,
+    GROQ_FALLBACK_SCHEMA_PROFILE,
     GroqResponseFormat,
+    GroqSchemaProfile,
     build_groq_system_prompt,
     build_groq_user_prompt,
-    get_optional_top_level_fields,
+    get_schema_for_profile,
+    get_tracked_top_level_fields,
+    is_simplified_schema_profile,
 )
 
 logger = logging.getLogger(__name__)
@@ -39,6 +42,8 @@ class GroqClientError(Exception):
     retriable: bool = False
     should_fallback: bool = False
     response_format: str | None = None
+    schema_profile: str | None = None
+    schema_simplified: bool = False
     attempted_response_formats: tuple[str, ...] = ()
     fallback_used: bool = False
 
@@ -50,6 +55,12 @@ class GroqClientError(Exception):
 class GroqComparisonResponse:
     result: AIComparisonResult
     metadata: AIComparisonMetadata
+
+
+@dataclass(frozen=True)
+class GroqResponseAttempt:
+    response_format: GroqResponseFormat
+    schema_profile: GroqSchemaProfile
 
 
 class GroqClient:
@@ -67,12 +78,19 @@ class GroqClient:
         comparison_input: dict,
         *,
         response_format: GroqResponseFormat | None = None,
+        schema_profile: GroqSchemaProfile | None = None,
     ) -> dict:
-        selected_response_format = response_format or self._resolve_response_formats()[0]
-        payload = {
+        default_attempt = self._resolve_response_attempts()[0]
+        selected_response_format = response_format or default_attempt.response_format
+        selected_schema_profile = schema_profile or default_attempt.schema_profile
+
+        return {
             "model": self._settings.GROQ_MODEL,
             "temperature": 0.1,
-            "response_format": self._build_response_format_payload(selected_response_format),
+            "response_format": self._build_response_format_payload(
+                selected_response_format,
+                schema_profile=selected_schema_profile,
+            ),
             "messages": [
                 {
                     "role": "system",
@@ -84,11 +102,11 @@ class GroqClient:
                         comparison_input,
                         response_format=selected_response_format,
                         model_name=self._settings.GROQ_MODEL,
+                        schema_profile=selected_schema_profile,
                     ),
                 },
             ],
         }
-        return payload
 
     async def compare_fatigue_analysis(self, comparison_input: dict) -> GroqComparisonResponse:
         if not self.is_configured:
@@ -98,32 +116,34 @@ class GroqClient:
                 retriable=False,
             )
 
-        response_formats = self._resolve_response_formats()
+        attempts = self._resolve_response_attempts()
         attempted_response_formats: list[str] = []
 
-        for index, response_format in enumerate(response_formats):
-            attempted_response_formats.append(response_format)
+        for index, attempt in enumerate(attempts):
+            attempted_response_formats.append(attempt.response_format)
             payload = self.build_chat_payload(
                 comparison_input,
-                response_format=response_format,
+                response_format=attempt.response_format,
+                schema_profile=attempt.schema_profile,
             )
 
             try:
                 response_payload = await self._post_chat_completion(
                     payload,
-                    response_format=response_format,
+                    response_format=attempt.response_format,
+                    schema_profile=attempt.schema_profile,
                 )
                 result, omitted_or_null_fields = self._validate_response_payload(
-                    response_payload
+                    response_payload,
+                    schema_profile=attempt.schema_profile,
                 )
             except GroqClientError as exc:
-                if (
-                    self._should_try_fallback(exc, response_format, response_formats, index)
-                ):
+                if self._should_try_fallback(exc, attempt, attempts, index):
                     logger.info(
-                        "Groq model=%s retrying response_format=%s -> json_object after code=%s",
+                        "Groq model=%s retrying response_format=%s schema_profile=%s after code=%s",
                         self._settings.GROQ_MODEL,
-                        response_format,
+                        attempt.response_format,
+                        attempt.schema_profile,
                         exc.code.value,
                     )
                     continue
@@ -131,14 +151,16 @@ class GroqClient:
                 raise self._attach_attempt_diagnostics(
                     exc,
                     attempted_response_formats,
-                    response_format=response_format,
+                    response_format=attempt.response_format,
+                    schema_profile=attempt.schema_profile,
                 ) from exc
 
             return GroqComparisonResponse(
                 result=result,
                 metadata=self._build_metadata(
                     attempted_response_formats,
-                    response_format=response_format,
+                    response_format=attempt.response_format,
+                    schema_profile=attempt.schema_profile,
                     omitted_or_null_fields=omitted_or_null_fields,
                 ),
             )
@@ -151,14 +173,38 @@ class GroqClient:
             fallback_used=len(attempted_response_formats) > 1,
         )
 
-    def _resolve_response_formats(self) -> tuple[GroqResponseFormat, ...]:
+    def _resolve_response_attempts(self) -> tuple[GroqResponseAttempt, ...]:
         if self._settings.GROQ_RESPONSE_FORMAT == "json_schema":
-            return ("json_schema",)
+            return (
+                GroqResponseAttempt(
+                    response_format="json_schema",
+                    schema_profile=GROQ_DEFAULT_SCHEMA_PROFILE,
+                ),
+            )
         if self._settings.GROQ_RESPONSE_FORMAT == "json_object":
-            return ("json_object",)
-        return ("json_schema", "json_object")
+            return (
+                GroqResponseAttempt(
+                    response_format="json_object",
+                    schema_profile=GROQ_FALLBACK_SCHEMA_PROFILE,
+                ),
+            )
+        return (
+            GroqResponseAttempt(
+                response_format="json_schema",
+                schema_profile=GROQ_DEFAULT_SCHEMA_PROFILE,
+            ),
+            GroqResponseAttempt(
+                response_format="json_object",
+                schema_profile=GROQ_FALLBACK_SCHEMA_PROFILE,
+            ),
+        )
 
-    def _build_response_format_payload(self, response_format: GroqResponseFormat) -> dict:
+    def _build_response_format_payload(
+        self,
+        response_format: GroqResponseFormat,
+        *,
+        schema_profile: GroqSchemaProfile,
+    ) -> dict:
         if response_format == "json_object":
             return {"type": "json_object"}
 
@@ -168,7 +214,7 @@ class GroqClient:
             "json_schema": {
                 "name": "fatigue_ai_comparison",
                 "strict": strict_mode,
-                "schema": GROQ_RESPONSE_JSON_SCHEMA,
+                "schema": get_schema_for_profile(schema_profile),
             },
         }
 
@@ -177,6 +223,7 @@ class GroqClient:
         payload: dict,
         *,
         response_format: GroqResponseFormat,
+        schema_profile: GroqSchemaProfile,
     ) -> dict:
         endpoint = f"{self._settings.GROQ_BASE_URL.rstrip('/')}/chat/completions"
         headers = {
@@ -193,6 +240,9 @@ class GroqClient:
                 code=AIComparisonErrorCode.timeout,
                 message="AI comparison timed out before a valid response arrived.",
                 retriable=True,
+                response_format=response_format,
+                schema_profile=schema_profile,
+                schema_simplified=is_simplified_schema_profile(schema_profile),
             ) from exc
         except httpx.HTTPStatusError as exc:
             status_code = exc.response.status_code
@@ -202,9 +252,10 @@ class GroqClient:
                 or self._is_provider_json_validation_error(status_code, error_message)
             )
             logger.warning(
-                "Groq HTTP error status=%s response_format=%s",
+                "Groq HTTP error status=%s response_format=%s schema_profile=%s",
                 status_code,
                 response_format,
+                schema_profile,
             )
             raise GroqClientError(
                 code=AIComparisonErrorCode.http_error,
@@ -215,12 +266,18 @@ class GroqClient:
                 ),
                 retriable=status_code >= 500,
                 should_fallback=should_fallback,
+                response_format=response_format,
+                schema_profile=schema_profile,
+                schema_simplified=is_simplified_schema_profile(schema_profile),
             ) from exc
         except httpx.HTTPError as exc:
             raise GroqClientError(
                 code=AIComparisonErrorCode.http_error,
                 message="AI comparison failed due to a network error.",
                 retriable=True,
+                response_format=response_format,
+                schema_profile=schema_profile,
+                schema_simplified=is_simplified_schema_profile(schema_profile),
             ) from exc
 
         try:
@@ -230,11 +287,16 @@ class GroqClient:
                 code=AIComparisonErrorCode.invalid_json,
                 message="The AI provider returned a non-JSON HTTP payload.",
                 retriable=False,
+                response_format=response_format,
+                schema_profile=schema_profile,
+                schema_simplified=is_simplified_schema_profile(schema_profile),
             ) from exc
 
     def _validate_response_payload(
         self,
         response_payload: dict,
+        *,
+        schema_profile: GroqSchemaProfile,
     ) -> tuple[AIComparisonResult, list[str]]:
         content = self._extract_message_content(response_payload)
         try:
@@ -244,6 +306,8 @@ class GroqClient:
                 code=AIComparisonErrorCode.invalid_json,
                 message="The AI provider returned message content that was not valid JSON.",
                 retriable=False,
+                schema_profile=schema_profile,
+                schema_simplified=is_simplified_schema_profile(schema_profile),
             ) from exc
 
         omitted_or_null_fields = self._collect_omitted_or_null_fields(parsed_content)
@@ -257,6 +321,8 @@ class GroqClient:
                 message="The AI provider returned JSON that did not match the expected schema.",
                 retriable=False,
                 should_fallback=True,
+                schema_profile=schema_profile,
+                schema_simplified=is_simplified_schema_profile(schema_profile),
             ) from exc
 
     def _build_metadata(
@@ -264,12 +330,13 @@ class GroqClient:
         attempted_response_formats: list[str],
         *,
         response_format: str,
+        schema_profile: GroqSchemaProfile,
         omitted_or_null_fields: list[str],
     ) -> AIComparisonMetadata:
         return AIComparisonMetadata(
             response_format=response_format,
-            schema_profile=GROQ_SCHEMA_PROFILE,
-            schema_simplified=True,
+            schema_profile=schema_profile,
+            schema_simplified=is_simplified_schema_profile(schema_profile),
             attempted_response_formats=attempted_response_formats,
             fallback_used=len(attempted_response_formats) > 1,
             omitted_or_null_fields=omitted_or_null_fields,
@@ -281,6 +348,7 @@ class GroqClient:
         attempted_response_formats: list[str],
         *,
         response_format: str,
+        schema_profile: GroqSchemaProfile,
     ) -> GroqClientError:
         return GroqClientError(
             code=exc.code,
@@ -288,6 +356,8 @@ class GroqClient:
             retriable=exc.retriable,
             should_fallback=exc.should_fallback,
             response_format=response_format,
+            schema_profile=schema_profile,
+            schema_simplified=is_simplified_schema_profile(schema_profile),
             attempted_response_formats=tuple(attempted_response_formats),
             fallback_used=len(attempted_response_formats) > 1,
         )
@@ -295,15 +365,15 @@ class GroqClient:
     def _should_try_fallback(
         self,
         exc: GroqClientError,
-        response_format: str,
-        response_formats: tuple[GroqResponseFormat, ...],
+        attempt: GroqResponseAttempt,
+        attempts: tuple[GroqResponseAttempt, ...],
         index: int,
     ) -> bool:
         return (
             exc.should_fallback
-            and response_format == "json_schema"
-            and index + 1 < len(response_formats)
-            and response_formats[index + 1] == "json_object"
+            and attempt.response_format == "json_schema"
+            and index + 1 < len(attempts)
+            and attempts[index + 1].response_format == "json_object"
         )
 
     def _is_unsupported_json_schema_error(
@@ -333,15 +403,14 @@ class GroqClient:
         if status_code != 400 or not error_message:
             return False
 
-        normalized_message = error_message.lower()
-        return "failed to validate json" in normalized_message
+        return "failed to validate json" in error_message.lower()
 
     def _collect_omitted_or_null_fields(self, parsed_content: object) -> list[str]:
         if not isinstance(parsed_content, dict):
-            return list(get_optional_top_level_fields())
+            return list(get_tracked_top_level_fields())
 
         omitted_or_null_fields: list[str] = []
-        for field_name in get_optional_top_level_fields():
+        for field_name in get_tracked_top_level_fields():
             if field_name not in parsed_content or parsed_content[field_name] is None:
                 omitted_or_null_fields.append(field_name)
 
