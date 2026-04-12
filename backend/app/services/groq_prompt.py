@@ -46,14 +46,18 @@ Do not add markdown.
 Do not add code fences.
 Do not add any text before or after the JSON.
 Use only the allowed keys.
+Do not wrap numbers in quotes.
 Use null when a nullable field cannot be derived reliably.
 """
 
-_POINT_PAIR_SCHEMA = {
-    "type": "array",
-    "items": {"type": "number"},
-    "minItems": 2,
-    "maxItems": 2,
+_POINT_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["x", "y"],
+    "properties": {
+        "x": {"type": "number"},
+        "y": {"type": "number"},
+    },
 }
 
 _AI_INTERPRETED_INPUTS_SCHEMA = {
@@ -175,13 +179,13 @@ GROQ_FULL_RESPONSE_JSON_SCHEMA: dict = {
         "safety_factor": {"type": ["number", "null"]},
         "sn_curve_points": {
             "type": ["array", "null"],
-            "items": _POINT_PAIR_SCHEMA,
+            "items": _POINT_SCHEMA,
         },
         "goodman_or_haigh_points": {
             "type": ["array", "null"],
-            "items": _POINT_PAIR_SCHEMA,
+            "items": _POINT_SCHEMA,
         },
-        "warnings": {"type": "array", "items": {"type": "string"}},
+        "warnings": {"type": ["array", "null"], "items": {"type": "string"}},
         "raw_model_name": {"type": "string"},
     },
 }
@@ -197,7 +201,7 @@ GROQ_MINIMAL_RESPONSE_JSON_SCHEMA: dict = {
         "stress_state": _AI_STRESS_STATE_SCHEMA,
         "life": _AI_LIFE_SCHEMA,
         "safety_factor": {"type": ["number", "null"]},
-        "warnings": {"type": "array", "items": {"type": "string"}},
+        "warnings": {"type": ["array", "null"], "items": {"type": "string"}},
         "raw_model_name": {"type": "string"},
     },
 }
@@ -230,6 +234,7 @@ def build_groq_user_prompt(
         f"Required keys: {required_keys}.",
         "Do not output markdown.",
         "Do not output any extra keys.",
+        "Return JSON numbers as numbers, not strings.",
         f'Set "raw_model_name" to "{model_name}" exactly.',
     ]
 
@@ -238,11 +243,17 @@ def build_groq_user_prompt(
             "Every listed key must be present. Use null for nullable fields instead of omitting them."
         )
         instructions.append(
-            'Use [] for "assumptions", "warnings", "sn_curve_points", and "goodman_or_haigh_points" when there is no data.'
+            'Use [] only for "assumptions" or "warnings" when they are genuinely empty.'
+        )
+        instructions.append(
+            'Return "sn_curve_points" and "goodman_or_haigh_points" as arrays of objects like {"x":10000,"y":390}. Use null when a point series cannot be derived reliably.'
         )
     else:
         instructions.append(
-            "Keep the response minimal. Omit the extended comparison fields."
+            "Keep the response minimal. Omit the extended comparison fields entirely."
+        )
+        instructions.append(
+            'Required minimal fields are "summary", "basquin_parameters", "modified_endurance_limit", "stress_state", "life", "safety_factor", "warnings", and "raw_model_name".'
         )
 
     if response_format == "json_object":

@@ -260,7 +260,19 @@ export interface AIComparisonLife {
   reason?: string | null;
 }
 
-export type AIComparisonPoint = [number, number];
+export interface AIComparisonPoint {
+  x: number;
+  y: number;
+}
+
+export interface AIComparisonValidationIssue {
+  field_path: string;
+  expected_type?: string | null;
+  actual_type?: string | null;
+  error_type: string;
+  missing: boolean;
+  wrong_shape: boolean;
+}
 
 export interface AIComparisonResult {
   summary: string;
@@ -291,6 +303,9 @@ export interface AIComparisonMetadata {
   attempted_response_formats: string[];
   fallback_used: boolean;
   omitted_or_null_fields: string[];
+  problematic_fields: string[];
+  validation_issue_count: number;
+  validation_issues: AIComparisonValidationIssue[];
 }
 
 export interface AIComparisonEnvelope {

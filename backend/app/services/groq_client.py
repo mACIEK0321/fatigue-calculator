@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from collections import Counter
 import json
 import logging
 from dataclasses import dataclass
+from typing import Any
 
 import httpx
 from pydantic import ValidationError
@@ -14,6 +16,7 @@ from app.models.schemas import (
     AIComparisonErrorCode,
     AIComparisonMetadata,
     AIComparisonResult,
+    AIComparisonValidationIssue,
 )
 from app.services.groq_prompt import (
     GROQ_DEFAULT_SCHEMA_PROFILE,
@@ -46,6 +49,8 @@ class GroqClientError(Exception):
     schema_simplified: bool = False
     attempted_response_formats: tuple[str, ...] = ()
     fallback_used: bool = False
+    validation_issues: tuple[AIComparisonValidationIssue, ...] = ()
+    problematic_fields: tuple[str, ...] = ()
 
     def __str__(self) -> str:
         return self.message
@@ -118,6 +123,8 @@ class GroqClient:
 
         attempts = self._resolve_response_attempts()
         attempted_response_formats: list[str] = []
+        validation_issues: list[AIComparisonValidationIssue] = []
+        problematic_fields: list[str] = []
 
         for index, attempt in enumerate(attempts):
             attempted_response_formats.append(attempt.response_format)
@@ -138,6 +145,9 @@ class GroqClient:
                     schema_profile=attempt.schema_profile,
                 )
             except GroqClientError as exc:
+                if exc.validation_issues:
+                    validation_issues = list(exc.validation_issues)
+                    problematic_fields = list(exc.problematic_fields)
                 if self._should_try_fallback(exc, attempt, attempts, index):
                     logger.info(
                         "Groq model=%s retrying response_format=%s schema_profile=%s after code=%s",
@@ -162,6 +172,8 @@ class GroqClient:
                     response_format=attempt.response_format,
                     schema_profile=attempt.schema_profile,
                     omitted_or_null_fields=omitted_or_null_fields,
+                    problematic_fields=problematic_fields,
+                    validation_issues=validation_issues,
                 ),
             )
 
@@ -315,7 +327,14 @@ class GroqClient:
         try:
             return AIComparisonResult.model_validate(parsed_content), omitted_or_null_fields
         except ValidationError as exc:
-            logger.warning("Groq schema validation failed: %s", exc)
+            validation_issues = self._build_validation_issues(exc)
+            problematic_fields = self._extract_problematic_fields(validation_issues)
+            logger.warning(
+                "Groq schema validation failed schema_profile=%s problematic_fields=%s issues=%s",
+                schema_profile,
+                problematic_fields,
+                [issue.model_dump() for issue in validation_issues],
+            )
             raise GroqClientError(
                 code=AIComparisonErrorCode.schema_validation,
                 message="The AI provider returned JSON that did not match the expected schema.",
@@ -323,6 +342,8 @@ class GroqClient:
                 should_fallback=True,
                 schema_profile=schema_profile,
                 schema_simplified=is_simplified_schema_profile(schema_profile),
+                validation_issues=tuple(validation_issues),
+                problematic_fields=tuple(problematic_fields),
             ) from exc
 
     def _build_metadata(
@@ -332,6 +353,8 @@ class GroqClient:
         response_format: str,
         schema_profile: GroqSchemaProfile,
         omitted_or_null_fields: list[str],
+        problematic_fields: list[str],
+        validation_issues: list[AIComparisonValidationIssue],
     ) -> AIComparisonMetadata:
         return AIComparisonMetadata(
             response_format=response_format,
@@ -340,6 +363,9 @@ class GroqClient:
             attempted_response_formats=attempted_response_formats,
             fallback_used=len(attempted_response_formats) > 1,
             omitted_or_null_fields=omitted_or_null_fields,
+            problematic_fields=problematic_fields,
+            validation_issue_count=len(validation_issues),
+            validation_issues=validation_issues,
         )
 
     def _attach_attempt_diagnostics(
@@ -360,7 +386,209 @@ class GroqClient:
             schema_simplified=is_simplified_schema_profile(schema_profile),
             attempted_response_formats=tuple(attempted_response_formats),
             fallback_used=len(attempted_response_formats) > 1,
+            validation_issues=exc.validation_issues,
+            problematic_fields=exc.problematic_fields,
         )
+
+    def _build_validation_issues(
+        self,
+        exc: ValidationError,
+    ) -> list[AIComparisonValidationIssue]:
+        validation_issues: list[AIComparisonValidationIssue] = []
+        for error in exc.errors(include_url=False):
+            loc = error.get("loc", ())
+            error_type = str(error.get("type", "unknown"))
+            validation_issues.append(
+                AIComparisonValidationIssue(
+                    field_path=self._format_field_path(loc),
+                    expected_type=self._lookup_expected_type(loc),
+                    actual_type=(
+                        None
+                        if error_type == "missing"
+                        else self._describe_input_type(error.get("input"))
+                    ),
+                    error_type=error_type,
+                    missing=error_type == "missing",
+                    wrong_shape=self._is_shape_validation_error(error_type),
+                )
+            )
+        return validation_issues
+
+    def _extract_problematic_fields(
+        self,
+        validation_issues: list[AIComparisonValidationIssue],
+    ) -> list[str]:
+        counts: Counter[str] = Counter()
+        for issue in validation_issues:
+            top_level_field = issue.field_path.split(".", 1)[0].split("[", 1)[0]
+            if top_level_field:
+                counts[top_level_field] += 1
+
+        return [field for field, _count in counts.most_common()]
+
+    def _format_field_path(self, loc: tuple[Any, ...] | Any) -> str:
+        if not isinstance(loc, tuple):
+            return str(loc)
+
+        parts: list[str] = []
+        for part in loc:
+            if isinstance(part, int):
+                if parts:
+                    parts[-1] = f"{parts[-1]}[{part}]"
+                else:
+                    parts.append(f"[{part}]")
+                continue
+            parts.append(str(part))
+
+        return ".".join(parts) if parts else "<root>"
+
+    def _lookup_expected_type(self, loc: tuple[Any, ...] | Any) -> str | None:
+        if not isinstance(loc, tuple):
+            return None
+
+        schema = AIComparisonResult.model_json_schema()
+        defs = schema.get("$defs", {})
+        node = self._resolve_schema_node(schema, defs, loc)
+        return self._describe_schema_type(node, defs)
+
+    def _resolve_schema_node(
+        self,
+        node: dict[str, Any] | None,
+        defs: dict[str, Any],
+        loc: tuple[Any, ...],
+    ) -> dict[str, Any] | None:
+        current = self._dereference_schema_node(node, defs)
+        for part in loc:
+            current = self._select_non_null_schema_variant(current, defs)
+            if current is None:
+                return None
+
+            if isinstance(part, int):
+                items = current.get("items")
+                if not isinstance(items, dict):
+                    return None
+                current = items
+                continue
+
+            properties = current.get("properties")
+            if not isinstance(properties, dict):
+                return None
+            child = properties.get(str(part))
+            if not isinstance(child, dict):
+                return None
+            current = child
+
+        return self._dereference_schema_node(current, defs)
+
+    def _dereference_schema_node(
+        self,
+        node: dict[str, Any] | None,
+        defs: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        current = node
+        while isinstance(current, dict) and "$ref" in current:
+            ref = current["$ref"]
+            if not isinstance(ref, str) or not ref.startswith("#/$defs/"):
+                return current
+            current = defs.get(ref.split("/")[-1])
+        return current
+
+    def _select_non_null_schema_variant(
+        self,
+        node: dict[str, Any] | None,
+        defs: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        current = self._dereference_schema_node(node, defs)
+        if not isinstance(current, dict):
+            return None
+
+        variants = current.get("anyOf") or current.get("oneOf")
+        if not isinstance(variants, list):
+            return current
+
+        resolved_variants = [
+            self._dereference_schema_node(variant, defs)
+            for variant in variants
+            if isinstance(variant, dict)
+        ]
+        non_null_variants = [
+            variant
+            for variant in resolved_variants
+            if isinstance(variant, dict) and variant.get("type") != "null"
+        ]
+        return non_null_variants[0] if non_null_variants else current
+
+    def _describe_schema_type(
+        self,
+        node: dict[str, Any] | None,
+        defs: dict[str, Any],
+    ) -> str | None:
+        current = self._select_non_null_schema_variant(node, defs)
+        if not isinstance(current, dict):
+            return None
+
+        if current.get("enum") is not None:
+            base_type = current.get("type")
+            if isinstance(base_type, str):
+                return f"enum<{base_type}>"
+            return "enum"
+
+        schema_type = current.get("type")
+        if isinstance(schema_type, list):
+            normalized = [item for item in schema_type if item != "null"]
+            return " | ".join(normalized) if normalized else "null"
+        if schema_type == "array":
+            items = current.get("items")
+            if isinstance(items, dict):
+                item_type = self._describe_schema_type(items, defs)
+                return f"array<{item_type or 'unknown'}>"
+            return "array"
+        if schema_type == "object":
+            properties = current.get("properties")
+            if isinstance(properties, dict) and set(properties.keys()) == {"x", "y"}:
+                return "array_point<object{x:number,y:number}>"
+            return "object"
+        if isinstance(schema_type, str):
+            return schema_type
+
+        variants = current.get("anyOf") or current.get("oneOf")
+        if isinstance(variants, list):
+            described = []
+            for variant in variants:
+                if isinstance(variant, dict):
+                    variant_type = self._describe_schema_type(variant, defs)
+                    if variant_type and variant_type not in described:
+                        described.append(variant_type)
+            if described:
+                return " | ".join(described)
+
+        return None
+
+    def _describe_input_type(self, value: Any) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return "boolean"
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return "number"
+        if isinstance(value, str):
+            return "string"
+        if isinstance(value, list):
+            return "array"
+        if isinstance(value, dict):
+            return "object"
+        return type(value).__name__
+
+    def _is_shape_validation_error(self, error_type: str) -> bool:
+        return error_type in {
+            "missing",
+            "list_type",
+            "tuple_type",
+            "dict_type",
+            "model_type",
+            "too_long",
+            "too_short",
+        }
 
     def _should_try_fallback(
         self,

@@ -276,12 +276,12 @@ describe("ResultsPanel", () => {
         },
         safety_factor: 0.91,
         sn_curve_points: [
-          [1e4, 430],
-          [1e6, 250],
+          { x: 1e4, y: 430 },
+          { x: 1e6, y: 250 },
         ],
         goodman_or_haigh_points: [
-          [0, 242],
-          [572, 0],
+          { x: 0, y: 242 },
+          { x: 572, y: 0 },
         ],
         warnings: ["Comparison warning"],
         raw_model_name: "openai/gpt-oss-20b",
@@ -554,6 +554,9 @@ describe("ResultsPanel", () => {
           "sn_curve_points",
           "goodman_or_haigh_points",
         ],
+        problematic_fields: [],
+        validation_issue_count: 0,
+        validation_issues: [],
       },
     };
 

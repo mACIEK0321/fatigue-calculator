@@ -1,9 +1,9 @@
 """Pydantic models for the fatigue analysis API."""
 
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class SurfaceFinishType(str, Enum):
@@ -493,8 +493,8 @@ class AIComparisonInterpretedInputs(BaseModel):
         None,
         description="Human-readable material label when available",
     )
-    sn_curve_source: str = Field(
-        ...,
+    sn_curve_source: Optional[str] = Field(
+        None,
         description="AI interpretation of the active S-N curve source",
     )
     surface_factor: Optional[float] = Field(
@@ -502,8 +502,8 @@ class AIComparisonInterpretedInputs(BaseModel):
         description="Effective surface factor ka interpreted from the request",
         gt=0,
     )
-    marin_factors: MarinFactors = Field(
-        ...,
+    marin_factors: Optional["AIComparisonMarinFactors"] = Field(
+        None,
         description="Marin factors interpreted by the AI",
     )
     notch_correction_factor: Optional[float] = Field(
@@ -511,10 +511,33 @@ class AIComparisonInterpretedInputs(BaseModel):
         description="AI interpretation of the effective fatigue notch factor",
         ge=1.0,
     )
-    loading_blocks_count: int = Field(
-        ...,
+    loading_blocks_count: Optional[int] = Field(
+        None,
         description="Number of loading blocks considered by the AI",
         ge=0,
+    )
+
+
+class AIComparisonMarinFactors(BaseModel):
+    size_factor: Optional[float] = Field(
+        None,
+        description="AI-interpreted size Marin factor",
+        gt=0,
+    )
+    load_factor: Optional[float] = Field(
+        None,
+        description="AI-interpreted load Marin factor",
+        gt=0,
+    )
+    temperature_factor: Optional[float] = Field(
+        None,
+        description="AI-interpreted temperature Marin factor",
+        gt=0,
+    )
+    reliability_factor: Optional[float] = Field(
+        None,
+        description="AI-interpreted reliability Marin factor",
+        gt=0,
     )
 
 
@@ -530,7 +553,10 @@ class AIComparisonStressState(BaseModel):
 
 
 class AIComparisonMeanStressResult(BaseModel):
-    model_name: MeanStressModel = Field(..., description="Mean stress model used by the AI")
+    model_name: Optional[MeanStressModel] = Field(
+        None,
+        description="Mean stress model used by the AI",
+    )
     effective_mean_stress: Optional[float] = Field(
         None,
         description="Effective mean stress used by the AI",
@@ -558,10 +584,33 @@ class AIComparisonLife(BaseModel):
     )
 
 
+class AIComparisonPoint(BaseModel):
+    x: float = Field(..., description="Chart x coordinate")
+    y: float = Field(..., description="Chart y coordinate")
+
+
+class AIComparisonValidationIssue(BaseModel):
+    field_path: str = Field(..., description="Dot path of the failing field")
+    expected_type: Optional[str] = Field(
+        None,
+        description="Normalized expected type from the backend schema",
+    )
+    actual_type: Optional[str] = Field(
+        None,
+        description="Normalized runtime type of the received value",
+    )
+    error_type: str = Field(..., description="Pydantic validation error code")
+    missing: bool = Field(False, description="Whether the field was missing entirely")
+    wrong_shape: bool = Field(
+        False,
+        description="Whether the value shape was wrong for an object/array/point field",
+    )
+
+
 class AIComparisonResult(BaseModel):
     summary: str = Field(..., description="Concise textual summary of the AI interpretation")
-    assumptions: list[str] = Field(
-        default_factory=list,
+    assumptions: Optional[list[str]] = Field(
+        None,
         description="Explicit assumptions stated by the AI",
     )
     interpreted_inputs: Optional[AIComparisonInterpretedInputs] = Field(
@@ -594,22 +643,45 @@ class AIComparisonResult(BaseModel):
         description="AI-reported safety factor",
         ge=0,
     )
-    sn_curve_points: list[tuple[float, float]] = Field(
-        default_factory=list,
-        description="AI S-N curve points as [cycles, stress] numeric pairs",
+    sn_curve_points: Optional[list[AIComparisonPoint]] = Field(
+        None,
+        description="AI S-N curve points as objects with numeric x and y fields",
     )
-    goodman_or_haigh_points: list[tuple[float, float]] = Field(
-        default_factory=list,
-        description="AI Goodman/Haigh points as [mean_stress, stress_amplitude] numeric pairs",
+    goodman_or_haigh_points: Optional[list[AIComparisonPoint]] = Field(
+        None,
+        description="AI Goodman/Haigh points as objects with numeric x and y fields",
     )
-    warnings: list[str] = Field(
-        default_factory=list,
+    warnings: Optional[list[str]] = Field(
+        None,
         description="Warnings emitted by the AI",
     )
     raw_model_name: str = Field(
         ...,
         description="Exact upstream model identifier reported by the AI provider",
     )
+
+    @field_validator("sn_curve_points", "goodman_or_haigh_points", mode="before")
+    @classmethod
+    def normalize_point_series(
+        cls,
+        value: Any,
+    ) -> Any:
+        if value is None:
+            return None
+        if not isinstance(value, list):
+            return value
+
+        normalized_points: list[dict[str, Any]] = []
+        for item in value:
+            if isinstance(item, dict):
+                normalized_points.append(item)
+                continue
+            if isinstance(item, (list, tuple)) and len(item) == 2:
+                normalized_points.append({"x": item[0], "y": item[1]})
+                continue
+            normalized_points.append(item)
+
+        return normalized_points
 
 
 class AIComparisonError(BaseModel):
@@ -645,6 +717,19 @@ class AIComparisonMetadata(BaseModel):
     omitted_or_null_fields: list[str] = Field(
         default_factory=list,
         description="Top-level AI response fields that were omitted or explicitly returned as null",
+    )
+    problematic_fields: list[str] = Field(
+        default_factory=list,
+        description="Top-level fields that triggered backend AI schema validation issues",
+    )
+    validation_issue_count: int = Field(
+        0,
+        description="Number of backend validation issues observed for the AI payload",
+        ge=0,
+    )
+    validation_issues: list[AIComparisonValidationIssue] = Field(
+        default_factory=list,
+        description="Sanitized backend validation diagnostics for the AI payload",
     )
 
 

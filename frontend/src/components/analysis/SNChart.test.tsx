@@ -103,8 +103,8 @@ describe("SNChart", () => {
         },
         safety_factor: 0.91,
         sn_curve_points: [
-          [1e4, 430],
-          [1e6, 250],
+          { x: 1e4, y: 430 },
+          { x: 1e6, y: 250 },
         ],
         goodman_or_haigh_points: [],
         warnings: [],
@@ -179,6 +179,9 @@ describe("SNChart", () => {
         attempted_response_formats: ["json_schema"],
         fallback_used: false,
         omitted_or_null_fields: ["sn_curve_points"],
+        problematic_fields: [],
+        validation_issue_count: 0,
+        validation_issues: [],
       },
     };
 

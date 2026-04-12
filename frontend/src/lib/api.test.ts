@@ -262,12 +262,12 @@ describe("analyzeFatigue", () => {
           life: { status: "finite", cycles: 100500, reason: "finite" },
           safety_factor: 1.11,
           sn_curve_points: [
-            [10000, 400],
-            [1000000, 250],
+            { x: 10000, y: 400 },
+            { x: 1000000, y: 250 },
           ],
           goodman_or_haigh_points: [
-            [0, 181],
-            [400, 0],
+            { x: 0, y: 181 },
+            { x: 400, y: 0 },
           ],
           warnings: [],
           raw_model_name: "openai/gpt-oss-20b",

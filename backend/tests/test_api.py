@@ -4,7 +4,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.models.schemas import AIComparisonMetadata, AIComparisonResult
+from app.models.schemas import (
+    AIComparisonMetadata,
+    AIComparisonResult,
+    AIComparisonValidationIssue,
+)
 from app.routers import analysis
 from app.services.groq_client import GroqComparisonResponse
 
@@ -127,8 +131,8 @@ def test_compare_endpoint_returns_native_and_ai_sections(
                         "reason": "Computed from Basquin response.",
                     },
                     safety_factor=1.12,
-                    sn_curve_points=[(1e4, 390.0), (1e6, 240.0)],
-                    goodman_or_haigh_points=[(0.0, 229.6), (600.0, 0.0)],
+                    sn_curve_points=[{"x": 1e4, "y": 390.0}, {"x": 1e6, "y": 240.0}],
+                    goodman_or_haigh_points=[{"x": 0.0, "y": 229.6}, {"x": 600.0, "y": 0.0}],
                     warnings=[],
                     raw_model_name="openai/gpt-oss-20b",
                 ),
@@ -139,6 +143,9 @@ def test_compare_endpoint_returns_native_and_ai_sections(
                     attempted_response_formats=["json_schema"],
                     fallback_used=False,
                     omitted_or_null_fields=[],
+                    problematic_fields=[],
+                    validation_issue_count=0,
+                    validation_issues=[],
                 ),
             )
 
@@ -156,6 +163,7 @@ def test_compare_endpoint_returns_native_and_ai_sections(
     assert body["ai_comparison"]["metadata"]["response_format"] == "json_schema"
     assert body["ai_comparison"]["metadata"]["schema_profile"] == "full_v1"
     assert body["ai_comparison"]["metadata"]["schema_simplified"] is False
+    assert body["ai_comparison"]["metadata"]["validation_issue_count"] == 0
 
 
 def test_compare_endpoint_preserves_native_analysis_when_ai_fails(
@@ -181,6 +189,7 @@ def test_compare_endpoint_preserves_native_analysis_when_ai_fails(
     assert body["ai_comparison"]["error"]["retriable"] is True
     assert body["ai_comparison"]["metadata"]["attempted_response_formats"] == []
     assert body["ai_comparison"]["metadata"]["schema_simplified"] is False
+    assert body["ai_comparison"]["metadata"]["validation_issue_count"] == 0
 
 
 def test_compare_endpoint_marks_skipped_when_ai_disabled() -> None:
@@ -193,6 +202,49 @@ def test_compare_endpoint_marks_skipped_when_ai_disabled() -> None:
     assert body["ai_comparison"]["error"]["code"] == "disabled"
     assert body["ai_comparison"]["metadata"]["fallback_used"] is False
     assert body["ai_comparison"]["metadata"]["schema_profile"] == "full_v1"
+    assert body["ai_comparison"]["metadata"]["validation_issue_count"] == 0
+
+
+def test_compare_endpoint_preserves_native_analysis_when_ai_schema_validation_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeGroqClient:
+        async def compare_fatigue_analysis(self, comparison_input: dict):
+            raise analysis.GroqClientError(
+                code=analysis.AIComparisonErrorCode.schema_validation,
+                message="The AI provider returned JSON that did not match the expected schema.",
+                retriable=False,
+                response_format="json_object",
+                schema_profile="minimal_v1",
+                schema_simplified=True,
+                attempted_response_formats=("json_schema", "json_object"),
+                fallback_used=True,
+                problematic_fields=("warnings",),
+                validation_issues=(
+                    AIComparisonValidationIssue(
+                        field_path="warnings",
+                        expected_type="array<string>",
+                        actual_type="string",
+                        error_type="list_type",
+                        missing=False,
+                        wrong_shape=True,
+                    ),
+                ),
+            )
+
+    monkeypatch.setattr(analysis, "get_groq_client", lambda: FakeGroqClient())
+
+    response = client.post("/api/analyze/compare", json=compare_payload())
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["native_analysis"]["selected_life"]["status"] == "infinite"
+    assert body["ai_comparison"]["status"] == "error"
+    assert body["ai_comparison"]["error"]["code"] == "schema_validation"
+    assert body["ai_comparison"]["metadata"]["schema_profile"] == "minimal_v1"
+    assert body["ai_comparison"]["metadata"]["problematic_fields"] == ["warnings"]
+    assert body["ai_comparison"]["metadata"]["validation_issue_count"] == 1
+    assert body["ai_comparison"]["metadata"]["validation_issues"][0]["field_path"] == "warnings"
 
 
 def test_analyze_endpoint_supports_notch_with_points_fit_and_loading_blocks() -> None:
