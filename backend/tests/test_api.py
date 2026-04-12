@@ -4,8 +4,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.models.schemas import AIComparisonResult
+from app.models.schemas import AIComparisonMetadata, AIComparisonResult
 from app.routers import analysis
+from app.services.groq_client import GroqComparisonResponse
 
 client = TestClient(app)
 
@@ -84,51 +85,58 @@ def test_compare_endpoint_returns_native_and_ai_sections(
     class FakeGroqClient:
         async def compare_fatigue_analysis(self, comparison_input: dict):
             assert comparison_input["surface_factor"]["effective_ka"] > 0
-            return AIComparisonResult(
-                summary="AI comparison summary",
-                assumptions=["Assume room temperature."],
-                interpreted_inputs={
-                    "material_label": None,
-                    "sn_curve_source": "material_basquin",
-                    "surface_factor": 0.82,
-                    "marin_factors": {
-                        "size_factor": 1.0,
-                        "load_factor": 1.0,
-                        "temperature_factor": 1.0,
-                        "reliability_factor": 1.0,
+            return GroqComparisonResponse(
+                result=AIComparisonResult(
+                    summary="AI comparison summary",
+                    assumptions=["Assume room temperature."],
+                    interpreted_inputs={
+                        "material_label": None,
+                        "sn_curve_source": "material_basquin",
+                        "surface_factor": 0.82,
+                        "marin_factors": {
+                            "size_factor": 1.0,
+                            "load_factor": 1.0,
+                            "temperature_factor": 1.0,
+                            "reliability_factor": 1.0,
+                        },
+                        "notch_correction_factor": None,
+                        "loading_blocks_count": 0,
                     },
-                    "notch_correction_factor": None,
-                    "loading_blocks_count": 0,
-                },
-                basquin_parameters={
-                    "sigma_f_prime": 1050.0,
-                    "b": -0.09,
-                    "source": "material_default_from_uts",
-                },
-                modified_endurance_limit=229.6,
-                stress_state={
-                    "max_stress": 180.0,
-                    "min_stress": -120.0,
-                    "mean_stress": 30.0,
-                    "stress_amplitude": 150.0,
-                    "stress_ratio": -0.667,
-                },
-                mean_stress_result={
-                    "model_name": "goodman",
-                    "effective_mean_stress": 30.0,
-                    "equivalent_alternating_stress": 158.3,
-                    "is_safe": True,
-                },
-                life={
-                    "status": "finite",
-                    "cycles": 2200000.0,
-                    "reason": "Computed from Basquin response.",
-                },
-                safety_factor=1.12,
-                sn_curve_points=[(1e4, 390.0), (1e6, 240.0)],
-                goodman_or_haigh_points=[(0.0, 229.6), (600.0, 0.0)],
-                warnings=[],
-                raw_model_name="openai/gpt-oss-20b",
+                    basquin_parameters={
+                        "sigma_f_prime": 1050.0,
+                        "b": -0.09,
+                        "source": "material_default_from_uts",
+                    },
+                    modified_endurance_limit=229.6,
+                    stress_state={
+                        "max_stress": 180.0,
+                        "min_stress": -120.0,
+                        "mean_stress": 30.0,
+                        "stress_amplitude": 150.0,
+                        "stress_ratio": -0.667,
+                    },
+                    mean_stress_result={
+                        "model_name": "goodman",
+                        "effective_mean_stress": 30.0,
+                        "equivalent_alternating_stress": 158.3,
+                        "is_safe": True,
+                    },
+                    life={
+                        "status": "finite",
+                        "cycles": 2200000.0,
+                        "reason": "Computed from Basquin response.",
+                    },
+                    safety_factor=1.12,
+                    sn_curve_points=[(1e4, 390.0), (1e6, 240.0)],
+                    goodman_or_haigh_points=[(0.0, 229.6), (600.0, 0.0)],
+                    warnings=[],
+                    raw_model_name="openai/gpt-oss-20b",
+                ),
+                metadata=AIComparisonMetadata(
+                    response_format="json_schema",
+                    attempted_response_formats=["json_schema"],
+                    fallback_used=False,
+                ),
             )
 
     monkeypatch.setattr(analysis, "get_groq_client", lambda: FakeGroqClient())
@@ -142,6 +150,7 @@ def test_compare_endpoint_returns_native_and_ai_sections(
     assert body["ai_comparison"]["status"] == "success"
     assert body["ai_comparison"]["provider"] == "groq"
     assert body["ai_comparison"]["result"]["raw_model_name"] == "openai/gpt-oss-20b"
+    assert body["ai_comparison"]["metadata"]["response_format"] == "json_schema"
 
 
 def test_compare_endpoint_preserves_native_analysis_when_ai_fails(
@@ -165,6 +174,7 @@ def test_compare_endpoint_preserves_native_analysis_when_ai_fails(
     assert body["ai_comparison"]["status"] == "error"
     assert body["ai_comparison"]["error"]["code"] == "timeout"
     assert body["ai_comparison"]["error"]["retriable"] is True
+    assert body["ai_comparison"]["metadata"]["attempted_response_formats"] == []
 
 
 def test_compare_endpoint_marks_skipped_when_ai_disabled() -> None:
@@ -175,6 +185,7 @@ def test_compare_endpoint_marks_skipped_when_ai_disabled() -> None:
     assert body["native_analysis"]["selected_life"]["status"] == "infinite"
     assert body["ai_comparison"]["status"] == "skipped"
     assert body["ai_comparison"]["error"]["code"] == "disabled"
+    assert body["ai_comparison"]["metadata"]["fallback_used"] is False
 
 
 def test_analyze_endpoint_supports_notch_with_points_fit_and_loading_blocks() -> None:

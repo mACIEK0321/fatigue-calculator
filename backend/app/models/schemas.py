@@ -621,6 +621,21 @@ class AIComparisonError(BaseModel):
     )
 
 
+class AIComparisonMetadata(BaseModel):
+    response_format: Optional[str] = Field(
+        None,
+        description="Groq response_format mode that produced the final response",
+    )
+    attempted_response_formats: list[str] = Field(
+        default_factory=list,
+        description="Ordered response_format modes attempted for this comparison",
+    )
+    fallback_used: bool = Field(
+        False,
+        description="Whether the backend retried with a fallback response_format",
+    )
+
+
 class AIComparisonEnvelope(BaseModel):
     provider: str = Field(..., description="AI provider identifier")
     enabled: bool = Field(..., description="Whether the user requested the AI comparison")
@@ -632,6 +647,10 @@ class AIComparisonEnvelope(BaseModel):
     error: Optional[AIComparisonError] = Field(
         None,
         description="Normalized AI comparison error on failure or skip",
+    )
+    metadata: Optional[AIComparisonMetadata] = Field(
+        None,
+        description="Optional diagnostics for the AI comparison request path",
     )
 
 

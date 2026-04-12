@@ -14,6 +14,7 @@ def test_settings_default_to_local_development(monkeypatch) -> None:
     assert settings.ALLOWED_ORIGINS == ["http://localhost:3000"]
     assert settings.GROQ_BASE_URL == "https://api.groq.com/openai/v1"
     assert settings.GROQ_MODEL == "openai/gpt-oss-20b"
+    assert settings.GROQ_RESPONSE_FORMAT == "auto"
     assert settings.GROQ_TIMEOUT_SECONDS == 20.0
 
 
@@ -59,3 +60,17 @@ def test_settings_reject_non_positive_groq_timeout(monkeypatch) -> None:
         assert "GROQ_TIMEOUT_SECONDS" in str(exc)
     else:
         raise AssertionError("Expected ValueError for non-positive Groq timeout.")
+
+
+def test_settings_reject_invalid_groq_response_format(monkeypatch) -> None:
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
+    monkeypatch.delenv("ALLOWED_ORIGINS", raising=False)
+    monkeypatch.setenv("GROQ_RESPONSE_FORMAT", "yaml")
+    config.get_settings.cache_clear()
+
+    try:
+        config.get_settings()
+    except ValueError as exc:
+        assert "GROQ_RESPONSE_FORMAT" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for invalid Groq response format.")

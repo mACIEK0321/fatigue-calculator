@@ -11,6 +11,7 @@ from app.core.fatigue_engine import (
 )
 from app.models.schemas import (
     AIComparisonErrorCode,
+    AIComparisonMetadata,
     FatigueAnalysisCompareRequest,
     FatigueAnalysisCompareResponse,
     FatigueAnalysisRequest,
@@ -177,6 +178,7 @@ def _build_ai_status(
     enabled: bool,
     status: str,
     result: dict | None = None,
+    metadata: dict | None = None,
     error_code: AIComparisonErrorCode | None = None,
     error_message: str | None = None,
     retriable: bool = False,
@@ -186,6 +188,7 @@ def _build_ai_status(
         "enabled": enabled,
         "status": status,
         "result": result,
+        "metadata": metadata,
         "error": (
             {
                 "code": error_code,
@@ -207,6 +210,7 @@ async def _run_ai_comparison(
         return _build_ai_status(
             enabled=False,
             status="skipped",
+            metadata=AIComparisonMetadata().model_dump(),
             error_code=AIComparisonErrorCode.disabled,
             error_message="AI comparison was not requested for this analysis.",
         )
@@ -221,6 +225,11 @@ async def _run_ai_comparison(
         return _build_ai_status(
             enabled=True,
             status="error",
+            metadata=AIComparisonMetadata(
+                response_format=exc.response_format,
+                attempted_response_formats=list(exc.attempted_response_formats),
+                fallback_used=exc.fallback_used,
+            ).model_dump(),
             error_code=exc.code,
             error_message=exc.message,
             retriable=exc.retriable,
@@ -238,7 +247,8 @@ async def _run_ai_comparison(
     return _build_ai_status(
         enabled=True,
         status="success",
-        result=result.model_dump(),
+        result=result.result.model_dump(),
+        metadata=result.metadata.model_dump(),
     )
 
 

@@ -12,9 +12,16 @@ Set these variables in `backend/.env` or in your deployment environment:
 GROQ_API_KEY=your-groq-api-key
 GROQ_BASE_URL=https://api.groq.com/openai/v1
 GROQ_MODEL=openai/gpt-oss-20b
+GROQ_RESPONSE_FORMAT=auto
 GROQ_TIMEOUT_SECONDS=20
 ALLOWED_ORIGINS=http://localhost:3000
 ```
+
+`GROQ_RESPONSE_FORMAT` supports:
+
+- `auto`: try `json_schema` first and fall back to `json_object` only when the model rejects `json_schema`
+- `json_schema`: force schema mode only
+- `json_object`: force JSON object mode only
 
 ### Local run
 

@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+from typing import Literal
 
-GROQ_SYSTEM_PROMPT = """You are a fatigue-analysis comparison engine.
+GroqResponseFormat = Literal["json_schema", "json_object"]
+
+_GROQ_SYSTEM_PROMPT_BASE = """You are a fatigue-analysis comparison engine.
 Return a structured JSON response that matches the supplied schema exactly.
 Do not add markdown.
 Do not add code fences.
@@ -147,13 +150,30 @@ GROQ_RESPONSE_JSON_SCHEMA: dict = {
 }
 
 
-def build_groq_user_prompt(payload: dict) -> str:
-    """Build the user prompt aligned with the strict Groq schema."""
+def build_groq_system_prompt(response_format: GroqResponseFormat) -> str:
+    """Build the system prompt for the requested Groq response format."""
+    if response_format == "json_object":
+        return (
+            _GROQ_SYSTEM_PROMPT_BASE
+            + "Your entire reply must be a single valid JSON object. "
+            + "The first character must be '{' and the last character must be '}'."
+        )
+
+    return _GROQ_SYSTEM_PROMPT_BASE
+
+
+def build_groq_user_prompt(
+    payload: dict,
+    *,
+    response_format: GroqResponseFormat,
+    model_name: str,
+) -> str:
+    """Build the user prompt aligned with the selected Groq response format."""
     normalized_payload = json.dumps(payload, ensure_ascii=True, indent=2)
 
-    return (
+    instructions = (
         "Analyze the following normalized fatigue input.\n"
-        "Return only data that fits the provided JSON schema.\n"
+        "Return only data that fits the required output structure.\n"
         "Requirements:\n"
         "1. Use the exact keys required by the schema.\n"
         "2. Keep `sn_curve_points` as numeric [cycles, stress] pairs.\n"
@@ -161,6 +181,20 @@ def build_groq_user_prompt(payload: dict) -> str:
         "4. Always include explicit assumptions and warnings arrays.\n"
         "5. Prefer numbers over narrative language.\n"
         "6. Respect the requested point limit in the input flags.\n"
-        "7. Set `raw_model_name` to the exact Groq model identifier in use.\n\n"
+        f"7. Set `raw_model_name` to `{model_name}` exactly.\n"
+    )
+
+    if response_format == "json_object":
+        instructions += (
+            "8. Return exactly one JSON object and nothing else.\n"
+            "9. Do not wrap the JSON in markdown or quotes.\n"
+            "10. Every required field must be present. Use null only where the schema allows null.\n\n"
+        )
+    else:
+        instructions += "\n"
+
+    return (
+        instructions
+        + "\n"
         f"Normalized fatigue input:\n{normalized_payload}"
     )

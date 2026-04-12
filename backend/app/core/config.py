@@ -35,6 +35,7 @@ class Settings:
     GROQ_API_KEY: str | None
     GROQ_BASE_URL: str
     GROQ_MODEL: str
+    GROQ_RESPONSE_FORMAT: str
     GROQ_TIMEOUT_SECONDS: float
 
 
@@ -42,10 +43,17 @@ class Settings:
 def get_settings() -> Settings:
     environment = os.getenv("ENVIRONMENT", "development").strip().lower() or "development"
     allowed_origins = _parse_allowed_origins(os.getenv("ALLOWED_ORIGINS"))
+    groq_response_format = (
+        os.getenv("GROQ_RESPONSE_FORMAT", "auto").strip().lower() or "auto"
+    )
     timeout_seconds = float(os.getenv("GROQ_TIMEOUT_SECONDS", "20").strip() or "20")
 
     if environment == "production" and "*" in allowed_origins:
         raise ValueError("ALLOWED_ORIGINS cannot contain '*' in production.")
+    if groq_response_format not in {"auto", "json_schema", "json_object"}:
+        raise ValueError(
+            "GROQ_RESPONSE_FORMAT must be one of: auto, json_schema, json_object."
+        )
     if timeout_seconds <= 0:
         raise ValueError("GROQ_TIMEOUT_SECONDS must be positive.")
 
@@ -61,6 +69,7 @@ def get_settings() -> Settings:
             os.getenv("GROQ_MODEL", "openai/gpt-oss-20b").strip()
             or "openai/gpt-oss-20b"
         ),
+        GROQ_RESPONSE_FORMAT=groq_response_format,
         GROQ_TIMEOUT_SECONDS=timeout_seconds,
     )
 

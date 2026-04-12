@@ -10,10 +10,15 @@ import httpx
 from pydantic import ValidationError
 
 from app.core.config import Settings
-from app.models.schemas import AIComparisonErrorCode, AIComparisonResult
+from app.models.schemas import (
+    AIComparisonErrorCode,
+    AIComparisonMetadata,
+    AIComparisonResult,
+)
 from app.services.groq_prompt import (
     GROQ_RESPONSE_JSON_SCHEMA,
-    GROQ_SYSTEM_PROMPT,
+    GroqResponseFormat,
+    build_groq_system_prompt,
     build_groq_user_prompt,
 )
 
@@ -30,9 +35,19 @@ class GroqClientError(Exception):
     code: AIComparisonErrorCode
     message: str
     retriable: bool = False
+    should_fallback: bool = False
+    response_format: str | None = None
+    attempted_response_formats: tuple[str, ...] = ()
+    fallback_used: bool = False
 
     def __str__(self) -> str:
         return self.message
+
+
+@dataclass(frozen=True)
+class GroqComparisonResponse:
+    result: AIComparisonResult
+    metadata: AIComparisonMetadata
 
 
 class GroqClient:
@@ -45,26 +60,35 @@ class GroqClient:
     def is_configured(self) -> bool:
         return bool(self._settings.GROQ_API_KEY)
 
-    def build_chat_payload(self, comparison_input: dict) -> dict:
-        strict_mode = self._settings.GROQ_MODEL in _STRICT_JSON_SCHEMA_MODELS
-        return {
+    def build_chat_payload(
+        self,
+        comparison_input: dict,
+        *,
+        response_format: GroqResponseFormat | None = None,
+    ) -> dict:
+        selected_response_format = response_format or self._resolve_response_formats()[0]
+        payload = {
             "model": self._settings.GROQ_MODEL,
             "temperature": 0.1,
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "fatigue_ai_comparison",
-                    "strict": strict_mode,
-                    "schema": GROQ_RESPONSE_JSON_SCHEMA,
-                },
-            },
+            "response_format": self._build_response_format_payload(selected_response_format),
             "messages": [
-                {"role": "system", "content": GROQ_SYSTEM_PROMPT},
-                {"role": "user", "content": build_groq_user_prompt(comparison_input)},
+                {
+                    "role": "system",
+                    "content": build_groq_system_prompt(selected_response_format),
+                },
+                {
+                    "role": "user",
+                    "content": build_groq_user_prompt(
+                        comparison_input,
+                        response_format=selected_response_format,
+                        model_name=self._settings.GROQ_MODEL,
+                    ),
+                },
             ],
         }
+        return payload
 
-    async def compare_fatigue_analysis(self, comparison_input: dict) -> AIComparisonResult:
+    async def compare_fatigue_analysis(self, comparison_input: dict) -> GroqComparisonResponse:
         if not self.is_configured:
             raise GroqClientError(
                 code=AIComparisonErrorCode.not_configured,
@@ -72,7 +96,84 @@ class GroqClient:
                 retriable=False,
             )
 
-        payload = self.build_chat_payload(comparison_input)
+        response_formats = self._resolve_response_formats()
+        attempted_response_formats: list[str] = []
+
+        for index, response_format in enumerate(response_formats):
+            attempted_response_formats.append(response_format)
+            payload = self.build_chat_payload(
+                comparison_input,
+                response_format=response_format,
+            )
+
+            try:
+                response_payload = await self._post_chat_completion(
+                    payload,
+                    response_format=response_format,
+                )
+                result = self._validate_response_payload(response_payload)
+            except GroqClientError as exc:
+                if (
+                    exc.should_fallback
+                    and response_format == "json_schema"
+                    and index + 1 < len(response_formats)
+                    and response_formats[index + 1] == "json_object"
+                ):
+                    logger.info(
+                        "Groq model=%s does not support json_schema; retrying with json_object",
+                        self._settings.GROQ_MODEL,
+                    )
+                    continue
+
+                raise self._attach_attempt_diagnostics(
+                    exc,
+                    attempted_response_formats,
+                    response_format=response_format,
+                ) from exc
+
+            return GroqComparisonResponse(
+                result=result,
+                metadata=self._build_metadata(
+                    attempted_response_formats,
+                    response_format=response_format,
+                ),
+            )
+
+        raise GroqClientError(
+            code=AIComparisonErrorCode.unexpected_error,
+            message="AI comparison failed before a final response format could be selected.",
+            retriable=False,
+            attempted_response_formats=tuple(attempted_response_formats),
+            fallback_used=len(attempted_response_formats) > 1,
+        )
+
+    def _resolve_response_formats(self) -> tuple[GroqResponseFormat, ...]:
+        if self._settings.GROQ_RESPONSE_FORMAT == "json_schema":
+            return ("json_schema",)
+        if self._settings.GROQ_RESPONSE_FORMAT == "json_object":
+            return ("json_object",)
+        return ("json_schema", "json_object")
+
+    def _build_response_format_payload(self, response_format: GroqResponseFormat) -> dict:
+        if response_format == "json_object":
+            return {"type": "json_object"}
+
+        strict_mode = self._settings.GROQ_MODEL in _STRICT_JSON_SCHEMA_MODELS
+        return {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "fatigue_ai_comparison",
+                "strict": strict_mode,
+                "schema": GROQ_RESPONSE_JSON_SCHEMA,
+            },
+        }
+
+    async def _post_chat_completion(
+        self,
+        payload: dict,
+        *,
+        response_format: GroqResponseFormat,
+    ) -> dict:
         endpoint = f"{self._settings.GROQ_BASE_URL.rstrip('/')}/chat/completions"
         headers = {
             "Authorization": f"Bearer {self._settings.GROQ_API_KEY}",
@@ -92,7 +193,15 @@ class GroqClient:
         except httpx.HTTPStatusError as exc:
             status_code = exc.response.status_code
             error_message = self._extract_error_message(exc.response)
-            logger.warning("Groq HTTP error status=%s", status_code)
+            should_fallback = (
+                response_format == "json_schema"
+                and self._is_unsupported_json_schema_error(status_code, error_message)
+            )
+            logger.warning(
+                "Groq HTTP error status=%s response_format=%s",
+                status_code,
+                response_format,
+            )
             raise GroqClientError(
                 code=AIComparisonErrorCode.http_error,
                 message=(
@@ -101,6 +210,7 @@ class GroqClient:
                     else f"AI comparison failed with HTTP {status_code}."
                 ),
                 retriable=status_code >= 500,
+                should_fallback=should_fallback,
             ) from exc
         except httpx.HTTPError as exc:
             raise GroqClientError(
@@ -110,7 +220,7 @@ class GroqClient:
             ) from exc
 
         try:
-            response_payload = response.json()
+            return response.json()
         except json.JSONDecodeError as exc:
             raise GroqClientError(
                 code=AIComparisonErrorCode.invalid_json,
@@ -118,6 +228,7 @@ class GroqClient:
                 retriable=False,
             ) from exc
 
+    def _validate_response_payload(self, response_payload: dict) -> AIComparisonResult:
         content = self._extract_message_content(response_payload)
         try:
             parsed_content = json.loads(content)
@@ -137,6 +248,54 @@ class GroqClient:
                 message="The AI provider returned JSON that did not match the expected schema.",
                 retriable=False,
             ) from exc
+
+    def _build_metadata(
+        self,
+        attempted_response_formats: list[str],
+        *,
+        response_format: str,
+    ) -> AIComparisonMetadata:
+        return AIComparisonMetadata(
+            response_format=response_format,
+            attempted_response_formats=attempted_response_formats,
+            fallback_used=len(attempted_response_formats) > 1,
+        )
+
+    def _attach_attempt_diagnostics(
+        self,
+        exc: GroqClientError,
+        attempted_response_formats: list[str],
+        *,
+        response_format: str,
+    ) -> GroqClientError:
+        return GroqClientError(
+            code=exc.code,
+            message=exc.message,
+            retriable=exc.retriable,
+            should_fallback=exc.should_fallback,
+            response_format=response_format,
+            attempted_response_formats=tuple(attempted_response_formats),
+            fallback_used=len(attempted_response_formats) > 1,
+        )
+
+    def _is_unsupported_json_schema_error(
+        self,
+        status_code: int,
+        error_message: str | None,
+    ) -> bool:
+        if status_code != 400 or not error_message:
+            return False
+
+        normalized_message = error_message.lower()
+        return (
+            "json_schema" in normalized_message
+            and "response format" in normalized_message
+            and (
+                "does not support" in normalized_message
+                or "not support" in normalized_message
+                or "unsupported" in normalized_message
+            )
+        )
 
     def _extract_message_content(self, response_payload: dict) -> str:
         try:

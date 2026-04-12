@@ -284,12 +284,19 @@ export interface AIComparisonError {
   retriable: boolean;
 }
 
+export interface AIComparisonMetadata {
+  response_format?: string | null;
+  attempted_response_formats: string[];
+  fallback_used: boolean;
+}
+
 export interface AIComparisonEnvelope {
   provider: string;
   enabled: boolean;
   status: AIComparisonStatus;
   result?: AIComparisonResult | null;
   error?: AIComparisonError | null;
+  metadata?: AIComparisonMetadata | null;
 }
 
 export interface FatigueAnalysisCompareResponse {
