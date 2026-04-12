@@ -4,15 +4,20 @@ import logging
 
 from fastapi import APIRouter, HTTPException
 
+from app.core.config import settings
 from app.core.fatigue_engine import (
     calculate_surface_factor,
     run_full_analysis,
 )
 from app.models.schemas import (
+    AIComparisonErrorCode,
+    FatigueAnalysisCompareRequest,
+    FatigueAnalysisCompareResponse,
     FatigueAnalysisRequest,
     FatigueAnalysisResponse,
     SurfaceFinishInput,
 )
+from app.services.deepseek_client import DeepSeekClient, DeepSeekClientError
 
 router = APIRouter(prefix="/api", tags=["analysis"])
 logger = logging.getLogger(__name__)
@@ -69,56 +74,182 @@ MATERIAL_PRESETS: list[dict] = [
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+def get_deepseek_client() -> DeepSeekClient:
+    return DeepSeekClient(settings)
+
+
+def _resolve_surface_factor(request: FatigueAnalysisRequest) -> float:
+    mat = request.material
+
+    if request.surface_factor_selection.mode.value == "empirical_surface_finish":
+        return calculate_surface_factor(
+            request.surface_factor_selection.finish_type.value,
+            mat.uts,
+        )
+
+    return request.surface_factor_selection.surface_factor
+
+
+def _run_native_analysis(request: FatigueAnalysisRequest) -> tuple[dict, float]:
+    """Execute the native fatigue analysis and return the result plus resolved ka."""
+    mat = request.material
+    ka = _resolve_surface_factor(request)
+
+    result = run_full_analysis(
+        max_stress=request.max_stress,
+        min_stress=request.min_stress,
+        uts=mat.uts,
+        yield_strength=mat.yield_strength,
+        endurance_limit=mat.endurance_limit,
+        elastic_modulus_gpa=mat.elastic_modulus,
+        fatigue_strength_coefficient=mat.fatigue_strength_coefficient,
+        fatigue_strength_exponent=mat.fatigue_strength_exponent,
+        fatigue_ductility_coefficient=mat.fatigue_ductility_coefficient,
+        fatigue_ductility_exponent=mat.fatigue_ductility_exponent,
+        ka=ka,
+        kb=request.marin_factors.size_factor,
+        kc=request.marin_factors.load_factor,
+        kd=request.marin_factors.temperature_factor,
+        ke=request.marin_factors.reliability_factor,
+        num_points=request.num_points,
+        selected_mean_stress_model=request.selected_mean_stress_model.value,
+        sn_curve_source_mode=request.sn_curve_source.mode.value,
+        sn_fit_points=(
+            [point.model_dump() for point in request.sn_curve_source.points]
+            if request.sn_curve_source.points
+            else None
+        ),
+        notch=request.notch.model_dump() if request.notch else None,
+        loading_blocks=(
+            [block.model_dump() for block in request.loading_blocks]
+            if request.loading_blocks
+            else None
+        ),
+    )
+    return result, ka
+
+
+def _build_ai_comparison_payload(
+    request: FatigueAnalysisCompareRequest,
+    native_analysis: dict,
+    ka: float,
+) -> dict:
+    return {
+        "material": request.material.model_dump(),
+        "sn_curve_source": {
+            "mode": request.sn_curve_source.mode.value,
+            "input_points": (
+                [point.model_dump() for point in request.sn_curve_source.points]
+                if request.sn_curve_source.points
+                else []
+            ),
+            "resolved_basquin_parameters": native_analysis["sn_curve_source"][
+                "basquin_parameters"
+            ],
+            "resolved_fit": native_analysis["sn_curve_source"]["basquin_fit"],
+        },
+        "stress_state": native_analysis["stress_state"],
+        "surface_factor": {
+            "mode": request.surface_factor_selection.mode.value,
+            "finish_type": (
+                request.surface_factor_selection.finish_type.value
+                if request.surface_factor_selection.finish_type is not None
+                else None
+            ),
+            "effective_ka": ka,
+        },
+        "marin_factors": request.marin_factors.model_dump(),
+        "selected_mean_stress_model": request.selected_mean_stress_model.value,
+        "notch_correction": request.notch.model_dump() if request.notch else None,
+        "loading_blocks": (
+            [block.model_dump() for block in request.loading_blocks]
+            if request.loading_blocks
+            else []
+        ),
+        "flags": request.ai_comparison.model_dump(),
+    }
+
+
+def _build_ai_status(
+    *,
+    enabled: bool,
+    status: str,
+    result: dict | None = None,
+    error_code: AIComparisonErrorCode | None = None,
+    error_message: str | None = None,
+    retriable: bool = False,
+) -> dict:
+    return {
+        "provider": "deepseek",
+        "enabled": enabled,
+        "status": status,
+        "result": result,
+        "error": (
+            {
+                "code": error_code,
+                "message": error_message,
+                "retriable": retriable,
+            }
+            if error_code is not None and error_message is not None
+            else None
+        ),
+    }
+
+
+async def _run_ai_comparison(
+    request: FatigueAnalysisCompareRequest,
+    native_analysis: dict,
+    ka: float,
+) -> dict:
+    if not request.ai_comparison.enabled:
+        return _build_ai_status(
+            enabled=False,
+            status="skipped",
+            error_code=AIComparisonErrorCode.disabled,
+            error_message="AI comparison was not requested for this analysis.",
+        )
+
+    payload = _build_ai_comparison_payload(request, native_analysis, ka)
+    client = get_deepseek_client()
+
+    try:
+        result = await client.compare_fatigue_analysis(payload)
+    except DeepSeekClientError as exc:
+        logger.warning("DeepSeek comparison failed code=%s", exc.code.value)
+        return _build_ai_status(
+            enabled=True,
+            status="error",
+            error_code=exc.code,
+            error_message=exc.message,
+            retriable=exc.retriable,
+        )
+    except Exception:
+        logger.exception("Unexpected DeepSeek comparison failure")
+        return _build_ai_status(
+            enabled=True,
+            status="error",
+            error_code=AIComparisonErrorCode.unexpected_error,
+            error_message="DeepSeek comparison failed due to an unexpected internal error.",
+            retriable=False,
+        )
+
+    return _build_ai_status(
+        enabled=True,
+        status="success",
+        result=result.model_dump(),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 @router.post("/analyze", response_model=FatigueAnalysisResponse)
 async def analyze_fatigue(request: FatigueAnalysisRequest) -> dict:
     """Perform a complete fatigue life analysis."""
-    mat = request.material
-
     try:
-        if request.surface_factor_selection.mode.value == "empirical_surface_finish":
-            ka = calculate_surface_factor(
-                request.surface_factor_selection.finish_type.value,
-                mat.uts,
-            )
-        else:
-            ka = request.surface_factor_selection.surface_factor
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    try:
-        result = run_full_analysis(
-            max_stress=request.max_stress,
-            min_stress=request.min_stress,
-            uts=mat.uts,
-            yield_strength=mat.yield_strength,
-            endurance_limit=mat.endurance_limit,
-            elastic_modulus_gpa=mat.elastic_modulus,
-            fatigue_strength_coefficient=mat.fatigue_strength_coefficient,
-            fatigue_strength_exponent=mat.fatigue_strength_exponent,
-            fatigue_ductility_coefficient=mat.fatigue_ductility_coefficient,
-            fatigue_ductility_exponent=mat.fatigue_ductility_exponent,
-            ka=ka,
-            kb=request.marin_factors.size_factor,
-            kc=request.marin_factors.load_factor,
-            kd=request.marin_factors.temperature_factor,
-            ke=request.marin_factors.reliability_factor,
-            num_points=request.num_points,
-            selected_mean_stress_model=request.selected_mean_stress_model.value,
-            sn_curve_source_mode=request.sn_curve_source.mode.value,
-            sn_fit_points=(
-                [point.model_dump() for point in request.sn_curve_source.points]
-                if request.sn_curve_source.points
-                else None
-            ),
-            notch=request.notch.model_dump() if request.notch else None,
-            loading_blocks=(
-                [block.model_dump() for block in request.loading_blocks]
-                if request.loading_blocks
-                else None
-            ),
-        )
+        result, _ = _run_native_analysis(request)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -129,6 +260,29 @@ async def analyze_fatigue(request: FatigueAnalysisRequest) -> dict:
         ) from exc
 
     return result
+
+
+@router.post("/analyze/compare", response_model=FatigueAnalysisCompareResponse)
+async def analyze_fatigue_with_comparison(
+    request: FatigueAnalysisCompareRequest,
+) -> dict:
+    """Perform native analysis and optionally add an AI comparison."""
+    try:
+        native_analysis, ka = _run_native_analysis(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Unexpected fatigue comparison failure")
+        raise HTTPException(
+            status_code=500,
+            detail="Fatigue analysis failed due to an internal server error.",
+        ) from exc
+
+    ai_comparison = await _run_ai_comparison(request, native_analysis, ka)
+    return {
+        "native_analysis": native_analysis,
+        "ai_comparison": ai_comparison,
+    }
 
 
 @router.post("/surface-factor")

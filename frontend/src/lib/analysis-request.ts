@@ -1,4 +1,6 @@
 import type {
+  AIComparisonOptions,
+  FatigueAnalysisCompareRequest,
   FatigueAnalysisRequest,
   LoadingBlock,
   MarinFactors,
@@ -10,6 +12,7 @@ import type {
   SurfaceFactorMode,
   SurfaceFinishType,
 } from "@/types/fatigue";
+import { sanitizeSNFitPoints } from "@/lib/basquin-fit";
 
 export interface FatigueFormValues {
   material: MaterialProperties;
@@ -34,7 +37,7 @@ function optionalNumber(value: number | null | undefined): number | undefined {
 }
 
 export function sanitizePoints(points: SNFitPoint[]): SNFitPoint[] {
-  return points.filter((point) => point.cycles > 0 && point.stress > 0);
+  return sanitizeSNFitPoints(points);
 }
 
 export function buildFatigueAnalysisRequest(
@@ -80,5 +83,15 @@ export function buildFatigueAnalysisRequest(
     notch: values.useNotch ? values.notch : undefined,
     loading_blocks:
       values.loadingBlocks.length > 0 ? values.loadingBlocks : undefined,
+  };
+}
+
+export function buildFatigueComparisonRequest(
+  values: FatigueFormValues,
+  aiComparison: AIComparisonOptions
+): FatigueAnalysisCompareRequest {
+  return {
+    ...buildFatigueAnalysisRequest(values),
+    ai_comparison: aiComparison,
   };
 }

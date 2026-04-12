@@ -19,6 +19,16 @@ export type NotchModel = "neuber" | "kuhn_hardrath";
 export type SNCurveSourceMode = "material_basquin" | "points_fit";
 
 export type FatigueLifeStatus = "finite" | "infinite";
+export type AIComparisonStatus = "success" | "error" | "skipped";
+export type AIComparisonErrorCode =
+  | "disabled"
+  | "not_configured"
+  | "timeout"
+  | "http_error"
+  | "empty_response"
+  | "invalid_json"
+  | "schema_validation"
+  | "unexpected_error";
 
 export interface MaterialProperties {
   uts: number;
@@ -79,6 +89,18 @@ export interface FatigueAnalysisRequest {
   selected_mean_stress_model?: MeanStressModel;
   notch?: NotchSensitivityInput;
   loading_blocks?: LoadingBlock[];
+}
+
+export interface AIComparisonOptions {
+  enabled: boolean;
+  include_interpreted_inputs?: boolean;
+  include_sn_curve_points?: boolean;
+  include_goodman_or_haigh_points?: boolean;
+  max_points_per_series?: number;
+}
+
+export interface FatigueAnalysisCompareRequest extends FatigueAnalysisRequest {
+  ai_comparison: AIComparisonOptions;
 }
 
 export interface FatigueLifeResult {
@@ -200,6 +222,79 @@ export interface FatigueAnalysisResponse {
   haigh_diagram: HaighDiagramData;
   notch_result?: NotchSensitivityResult | null;
   miner_damage?: MinerDamageResult | null;
+}
+
+export interface AIComparisonBasquinParameters {
+  sigma_f_prime?: number | null;
+  b?: number | null;
+  source?: string | null;
+}
+
+export interface AIComparisonInterpretedInputs {
+  material_label?: string | null;
+  sn_curve_source: string;
+  surface_factor?: number | null;
+  marin_factors: MarinFactors;
+  notch_correction_factor?: number | null;
+  loading_blocks_count: number;
+}
+
+export interface AIComparisonStressState {
+  max_stress: number;
+  min_stress: number;
+  mean_stress: number;
+  stress_amplitude: number;
+  stress_ratio?: number | null;
+}
+
+export interface AIComparisonMeanStressResult {
+  model_name: MeanStressModel;
+  effective_mean_stress?: number | null;
+  equivalent_alternating_stress?: number | null;
+  is_safe?: boolean | null;
+}
+
+export interface AIComparisonLife {
+  status: FatigueLifeStatus;
+  cycles?: number | null;
+  reason?: string | null;
+}
+
+export type AIComparisonPoint = [number, number];
+
+export interface AIComparisonResult {
+  summary: string;
+  assumptions: string[];
+  interpreted_inputs: AIComparisonInterpretedInputs;
+  basquin_parameters: AIComparisonBasquinParameters;
+  modified_endurance_limit?: number | null;
+  stress_state: AIComparisonStressState;
+  mean_stress_result: AIComparisonMeanStressResult;
+  life: AIComparisonLife;
+  safety_factor?: number | null;
+  sn_curve_points: AIComparisonPoint[];
+  goodman_or_haigh_points: AIComparisonPoint[];
+  warnings: string[];
+  raw_model_name: string;
+}
+
+export interface AIComparisonError {
+  code: AIComparisonErrorCode;
+  message: string;
+  retriable: boolean;
+}
+
+export interface AIComparisonEnvelope {
+  provider: string;
+  enabled: boolean;
+  status: AIComparisonStatus;
+  result?: AIComparisonResult | null;
+  error?: AIComparisonError | null;
+}
+
+export interface FatigueAnalysisCompareResponse {
+  native_analysis: FatigueAnalysisResponse;
+  ai_comparison: AIComparisonEnvelope;
 }
 
 export interface SurfaceFinishInput {

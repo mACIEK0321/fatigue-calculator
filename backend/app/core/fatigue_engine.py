@@ -15,6 +15,7 @@ SURFACE_FINISH_COEFFICIENTS: dict[str, dict[str, float]] = {
 SUPPORTED_MEAN_STRESS_MODELS = ("goodman", "gerber", "soderberg", "morrow")
 _DEFAULT_BASQUIN_EXPONENT = -0.085
 _DEFAULT_SIGMA_F_PRIME_FACTOR = 1.75
+_DISPLAY_MIN_CYCLES = 1.0
 _DISPLAY_MAX_CYCLES = 1e9
 _MAX_SERIALIZABLE_SAFETY_FACTOR = 1e12
 
@@ -630,7 +631,7 @@ def generate_sn_curve(
     b: float,
     se: float = 0.0,
     num_points: int = 100,
-    n_min: float = 1e1,
+    n_min: float = _DISPLAY_MIN_CYCLES,
     n_max: float = _DISPLAY_MAX_CYCLES,
 ) -> list[SNDataPoint]:
     """Generate S-N curve data with an endurance-limit plateau."""

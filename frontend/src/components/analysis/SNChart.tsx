@@ -5,6 +5,7 @@ import {
   CartesianGrid,
   Line,
   LineChart,
+  Legend,
   ReferenceLine,
   ResponsiveContainer,
   Scatter,
@@ -13,11 +14,16 @@ import {
   YAxis,
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { SNCurveSourceResult, SNChartData } from "@/types/fatigue";
+import type {
+  AIComparisonEnvelope,
+  SNCurveSourceResult,
+  SNChartData,
+} from "@/types/fatigue";
 
 interface SNChartProps {
   chartData: SNChartData | null;
   curveSource: SNCurveSourceResult | null;
+  aiComparison: AIComparisonEnvelope | null;
 }
 
 function formatLogTick(value: number): string {
@@ -26,7 +32,11 @@ function formatLogTick(value: number): string {
   return `10^${exponent}`;
 }
 
-export default function SNChart({ chartData, curveSource }: SNChartProps) {
+export default function SNChart({
+  chartData,
+  curveSource,
+  aiComparison,
+}: SNChartProps) {
   if (!chartData || chartData.curve.length === 0) {
     return (
       <Card>
@@ -56,6 +66,13 @@ export default function SNChart({ chartData, curveSource }: SNChartProps) {
         },
       ]
     : [];
+  const aiCurve =
+    aiComparison?.status === "success" && aiComparison.result
+      ? aiComparison.result.sn_curve_points.map(([cycles, stress]) => ({
+          cycles,
+          stress,
+        }))
+      : [];
 
   return (
     <Card>
@@ -63,10 +80,10 @@ export default function SNChart({ chartData, curveSource }: SNChartProps) {
         <CardTitle>S-N curve</CardTitle>
         <p className="text-sm leading-6 text-[#475569]">
           {curveSource?.mode === "points_fit"
-            ? "Curve fitted from S-N points."
-            : "Curve generated from Basquin parameters."}
+            ? "Chart uses the backend-returned S-N curve fitted from points and limited by the modified endurance threshold."
+            : "Chart uses the backend-returned curve generated from Basquin parameters."}
           {curveSource?.basquin_fit
-            ? ` Fit quality R² = ${curveSource.basquin_fit.r_squared.toFixed(4)}.`
+            ? ` Backend fit R^2 = ${curveSource.basquin_fit.r_squared.toFixed(4)} from ${curveSource.basquin_fit.points_used} points.`
             : ""}
         </p>
       </CardHeader>
@@ -162,6 +179,7 @@ export default function SNChart({ chartData, curveSource }: SNChartProps) {
                 }}
                 labelFormatter={(label) => `N = ${formatLogTick(Number(label))}`}
               />
+              <Legend wrapperStyle={{ color: "#475569", fontSize: 12 }} />
               <ReferenceLine
                 y={chartData.endurance_limit}
                 stroke="#ea580c"
@@ -180,6 +198,18 @@ export default function SNChart({ chartData, curveSource }: SNChartProps) {
                 dot={false}
                 name="Active S-N curve"
               />
+              {aiCurve.length > 0 ? (
+                <Line
+                  type="monotone"
+                  data={aiCurve}
+                  dataKey="stress"
+                  stroke="#0f766e"
+                  strokeWidth={2}
+                  strokeDasharray="6 4"
+                  dot={false}
+                  name="DeepSeek S-N curve"
+                />
+              ) : null}
               {selectedPoint.length > 0 ? (
                 <Scatter
                   data={selectedPoint}

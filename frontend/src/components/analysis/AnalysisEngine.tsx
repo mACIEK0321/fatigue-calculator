@@ -5,18 +5,20 @@ import GoodmanDiagram from "./GoodmanDiagram";
 import MaterialForm from "./MaterialForm";
 import ResultsPanel from "./ResultsPanel";
 import SNChart from "./SNChart";
-import { ApiError, analyzeFatigue } from "@/lib/api";
+import { ApiError, analyzeFatigueComparison } from "@/lib/api";
 import type {
-  FatigueAnalysisRequest,
-  FatigueAnalysisResponse,
+  FatigueAnalysisCompareRequest,
+  FatigueAnalysisCompareResponse,
   SNCurveSourceMode,
   SNFitPoint,
 } from "@/types/fatigue";
 
 export default function AnalysisEngine() {
-  const [response, setResponse] = useState<FatigueAnalysisResponse | null>(null);
+  const [response, setResponse] =
+    useState<FatigueAnalysisCompareResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [compareWithDeepSeek, setCompareWithDeepSeek] = useState(false);
   const [snCurveSourceMode, setSnCurveSourceMode] =
     useState<SNCurveSourceMode>("material_basquin");
   const [snPoints, setSnPoints] = useState<SNFitPoint[]>([
@@ -25,12 +27,12 @@ export default function AnalysisEngine() {
     { cycles: 1e6, stress: 245 },
   ]);
 
-  const handleSubmit = async (request: FatigueAnalysisRequest) => {
+  const handleSubmit = async (request: FatigueAnalysisCompareRequest) => {
     setIsLoading(true);
     setError(null);
 
     try {
-      const result = await analyzeFatigue(request);
+      const result = await analyzeFatigueComparison(request);
       setResponse(result);
     } catch (err) {
       if (err instanceof ApiError) {
@@ -62,18 +64,26 @@ export default function AnalysisEngine() {
           onSNCurveSourceModeChange={setSnCurveSourceMode}
           snPoints={snPoints}
           onSNPointsChange={setSnPoints}
+          compareWithDeepSeek={compareWithDeepSeek}
+          onCompareWithDeepSeekChange={setCompareWithDeepSeek}
         />
-        <ResultsPanel results={response} />
+        <ResultsPanel
+          results={response?.native_analysis ?? null}
+          aiComparison={response?.ai_comparison ?? null}
+          isLoading={isLoading}
+          showAIComparison={compareWithDeepSeek}
+        />
       </section>
 
       <section className="grid grid-cols-1 gap-6 xl:grid-cols-2">
         <SNChart
-          chartData={response?.sn_chart ?? null}
-          curveSource={response?.sn_curve_source ?? null}
+          chartData={response?.native_analysis.sn_chart ?? null}
+          curveSource={response?.native_analysis.sn_curve_source ?? null}
+          aiComparison={response?.ai_comparison ?? null}
         />
         <GoodmanDiagram
-          diagram={response?.haigh_diagram ?? null}
-          selectedModel={response?.selected_mean_stress_model ?? null}
+          diagram={response?.native_analysis.haigh_diagram ?? null}
+          selectedModel={response?.native_analysis.selected_mean_stress_model ?? null}
         />
       </section>
     </div>

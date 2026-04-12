@@ -1,4 +1,6 @@
 import type {
+  FatigueAnalysisCompareRequest,
+  FatigueAnalysisCompareResponse,
   FatigueAnalysisRequest,
   FatigueAnalysisResponse,
   MaterialPreset,
@@ -77,6 +79,15 @@ export async function analyzeFatigue(
   request: FatigueAnalysisRequest
 ): Promise<FatigueAnalysisResponse> {
   return apiFetch<FatigueAnalysisResponse>("/analyze", {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+}
+
+export async function analyzeFatigueComparison(
+  request: FatigueAnalysisCompareRequest
+): Promise<FatigueAnalysisCompareResponse> {
+  return apiFetch<FatigueAnalysisCompareResponse>("/analyze/compare", {
     method: "POST",
     body: JSON.stringify(request),
   });

@@ -40,6 +40,23 @@ class FatigueLifeStatus(str, Enum):
     infinite = "infinite"
 
 
+class AIComparisonStatus(str, Enum):
+    success = "success"
+    error = "error"
+    skipped = "skipped"
+
+
+class AIComparisonErrorCode(str, Enum):
+    disabled = "disabled"
+    not_configured = "not_configured"
+    timeout = "timeout"
+    http_error = "http_error"
+    empty_response = "empty_response"
+    invalid_json = "invalid_json"
+    schema_validation = "schema_validation"
+    unexpected_error = "unexpected_error"
+
+
 class MaterialProperties(BaseModel):
     uts: float = Field(..., description="Ultimate tensile strength in MPa", gt=0)
     yield_strength: float = Field(..., description="Yield strength in MPa", gt=0)
@@ -219,6 +236,38 @@ class FatigueAnalysisRequest(BaseModel):
                     "must be provided together in material_basquin mode"
                 )
         return self
+
+
+class AIComparisonOptions(BaseModel):
+    enabled: bool = Field(
+        False,
+        description="Whether to request optional AI comparison through the backend",
+    )
+    include_interpreted_inputs: bool = Field(
+        True,
+        description="Whether the AI should echo its interpreted inputs",
+    )
+    include_sn_curve_points: bool = Field(
+        True,
+        description="Whether the AI should return S-N curve points",
+    )
+    include_goodman_or_haigh_points: bool = Field(
+        True,
+        description="Whether the AI should return Haigh/Goodman points",
+    )
+    max_points_per_series: int = Field(
+        25,
+        description="Maximum number of chart points to request for each AI series",
+        ge=2,
+        le=200,
+    )
+
+
+class FatigueAnalysisCompareRequest(FatigueAnalysisRequest):
+    ai_comparison: AIComparisonOptions = Field(
+        default_factory=AIComparisonOptions,
+        description="Optional AI comparison configuration",
+    )
 
 
 class FatigueLifeResult(BaseModel):
@@ -419,4 +468,179 @@ class FatigueAnalysisResponse(BaseModel):
     miner_damage: Optional[MinerDamageResult] = Field(
         None,
         description="Palmgren-Miner cumulative damage result",
+    )
+
+
+class AIComparisonBasquinParameters(BaseModel):
+    sigma_f_prime: Optional[float] = Field(
+        None,
+        description="AI-reported fatigue strength coefficient in MPa",
+        gt=0,
+    )
+    b: Optional[float] = Field(
+        None,
+        description="AI-reported Basquin exponent",
+        lt=0,
+    )
+    source: Optional[str] = Field(
+        None,
+        description="How the AI interpreted the active S-N curve source",
+    )
+
+
+class AIComparisonInterpretedInputs(BaseModel):
+    material_label: Optional[str] = Field(
+        None,
+        description="Human-readable material label when available",
+    )
+    sn_curve_source: str = Field(
+        ...,
+        description="AI interpretation of the active S-N curve source",
+    )
+    surface_factor: Optional[float] = Field(
+        None,
+        description="Effective surface factor ka interpreted from the request",
+        gt=0,
+    )
+    marin_factors: MarinFactors = Field(
+        ...,
+        description="Marin factors interpreted by the AI",
+    )
+    notch_correction_factor: Optional[float] = Field(
+        None,
+        description="AI interpretation of the effective fatigue notch factor",
+        ge=1.0,
+    )
+    loading_blocks_count: int = Field(
+        ...,
+        description="Number of loading blocks considered by the AI",
+        ge=0,
+    )
+
+
+class AIComparisonStressState(BaseModel):
+    max_stress: float = Field(..., description="Maximum stress in MPa")
+    min_stress: float = Field(..., description="Minimum stress in MPa")
+    mean_stress: float = Field(..., description="Mean stress in MPa")
+    stress_amplitude: float = Field(..., description="Alternating stress in MPa")
+    stress_ratio: Optional[float] = Field(
+        None,
+        description="Stress ratio R = min/max",
+    )
+
+
+class AIComparisonMeanStressResult(BaseModel):
+    model_name: MeanStressModel = Field(..., description="Mean stress model used by the AI")
+    effective_mean_stress: Optional[float] = Field(
+        None,
+        description="Effective mean stress used by the AI",
+    )
+    equivalent_alternating_stress: Optional[float] = Field(
+        None,
+        description="Equivalent fully reversed alternating stress in MPa",
+    )
+    is_safe: Optional[bool] = Field(
+        None,
+        description="Whether the AI considers the case safe",
+    )
+
+
+class AIComparisonLife(BaseModel):
+    status: FatigueLifeStatus = Field(..., description="Finite or infinite life")
+    cycles: Optional[float] = Field(
+        None,
+        description="Predicted cycles to failure when life is finite",
+        ge=0,
+    )
+    reason: Optional[str] = Field(
+        None,
+        description="Short explanation for the AI life estimate",
+    )
+
+
+class AIComparisonResult(BaseModel):
+    summary: str = Field(..., description="Concise textual summary of the AI interpretation")
+    assumptions: list[str] = Field(
+        default_factory=list,
+        description="Explicit assumptions stated by the AI",
+    )
+    interpreted_inputs: AIComparisonInterpretedInputs = Field(
+        ...,
+        description="Structured echo of the input interpreted by the AI",
+    )
+    basquin_parameters: AIComparisonBasquinParameters = Field(
+        ...,
+        description="AI-reported Basquin parameters",
+    )
+    modified_endurance_limit: Optional[float] = Field(
+        None,
+        description="AI-reported modified endurance limit in MPa",
+        gt=0,
+    )
+    stress_state: AIComparisonStressState = Field(
+        ...,
+        description="AI-reported stress state",
+    )
+    mean_stress_result: AIComparisonMeanStressResult = Field(
+        ...,
+        description="AI-reported mean stress correction result",
+    )
+    life: AIComparisonLife = Field(
+        ...,
+        description="AI-reported fatigue life",
+    )
+    safety_factor: Optional[float] = Field(
+        None,
+        description="AI-reported safety factor",
+        ge=0,
+    )
+    sn_curve_points: list[tuple[float, float]] = Field(
+        default_factory=list,
+        description="AI S-N curve points as [cycles, stress] numeric pairs",
+    )
+    goodman_or_haigh_points: list[tuple[float, float]] = Field(
+        default_factory=list,
+        description="AI Goodman/Haigh points as [mean_stress, stress_amplitude] numeric pairs",
+    )
+    warnings: list[str] = Field(
+        default_factory=list,
+        description="Warnings emitted by the AI",
+    )
+    raw_model_name: str = Field(
+        ...,
+        description="Exact upstream model identifier reported by DeepSeek",
+    )
+
+
+class AIComparisonError(BaseModel):
+    code: AIComparisonErrorCode = Field(..., description="Normalized AI comparison error code")
+    message: str = Field(..., description="Human-readable diagnostic message")
+    retriable: bool = Field(
+        False,
+        description="Whether retrying the AI request could plausibly succeed",
+    )
+
+
+class AIComparisonEnvelope(BaseModel):
+    provider: str = Field(..., description="AI provider identifier")
+    enabled: bool = Field(..., description="Whether the user requested the AI comparison")
+    status: AIComparisonStatus = Field(..., description="Overall AI comparison status")
+    result: Optional[AIComparisonResult] = Field(
+        None,
+        description="Structured AI comparison result on success",
+    )
+    error: Optional[AIComparisonError] = Field(
+        None,
+        description="Normalized AI comparison error on failure or skip",
+    )
+
+
+class FatigueAnalysisCompareResponse(BaseModel):
+    native_analysis: FatigueAnalysisResponse = Field(
+        ...,
+        description="Native backend fatigue analysis result",
+    )
+    ai_comparison: AIComparisonEnvelope = Field(
+        ...,
+        description="Optional AI comparison payload and status",
     )

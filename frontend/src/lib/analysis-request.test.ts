@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { buildFatigueAnalysisRequest } from "@/lib/analysis-request";
+import {
+  buildFatigueAnalysisRequest,
+  buildFatigueComparisonRequest,
+} from "@/lib/analysis-request";
 
 describe("buildFatigueAnalysisRequest", () => {
   it("maps points-fit, notch, and Miner blocks into the backend contract", () => {
@@ -85,6 +88,61 @@ describe("buildFatigueAnalysisRequest", () => {
       loading_blocks: [
         { max_stress: 320, min_stress: -80, cycles: 50000, repeats: 3 },
       ],
+    });
+  });
+
+  it("wraps the normalized native request with AI comparison options", () => {
+    const request = buildFatigueComparisonRequest(
+      {
+        material: {
+          uts: 600,
+          yield_strength: 400,
+          endurance_limit: 280,
+          elastic_modulus: 210,
+        },
+        maxStress: 180,
+        minStress: -120,
+        snCurveSourceMode: "material_basquin",
+        snPoints: [],
+        surfaceFactorMode: "empirical_surface_finish",
+        surfaceFinish: "machined",
+        manualSurfaceFactor: 0.85,
+        marinFactors: {
+          size_factor: 1,
+          load_factor: 1,
+          temperature_factor: 1,
+          reliability_factor: 1,
+        },
+        selectedModel: "goodman",
+        useNotch: false,
+        notch: {
+          model: "neuber",
+          kt: 1,
+          notch_radius_mm: 1,
+          notch_constant_mm: 0.25,
+        },
+        loadingBlocks: [],
+      },
+      {
+        enabled: true,
+        include_interpreted_inputs: true,
+        include_sn_curve_points: true,
+        include_goodman_or_haigh_points: true,
+        max_points_per_series: 25,
+      }
+    );
+
+    expect(request.ai_comparison).toStrictEqual({
+      enabled: true,
+      include_interpreted_inputs: true,
+      include_sn_curve_points: true,
+      include_goodman_or_haigh_points: true,
+      max_points_per_series: 25,
+    });
+    expect(request.max_stress).toBe(180);
+    expect(request.surface_factor_selection).toStrictEqual({
+      mode: "empirical_surface_finish",
+      finish_type: "machined",
     });
   });
 });

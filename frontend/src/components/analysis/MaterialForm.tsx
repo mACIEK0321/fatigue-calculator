@@ -16,12 +16,13 @@ import {
 } from "@/components/ui/select";
 import { getMaterialPresets } from "@/lib/api";
 import {
-  buildFatigueAnalysisRequest,
+  buildFatigueComparisonRequest,
+  type FatigueFormValues,
   sanitizePoints,
 } from "@/lib/analysis-request";
 import { parseNumericDraft, toNumericDraft } from "@/lib/analysis-form";
 import type {
-  FatigueAnalysisRequest,
+  FatigueAnalysisCompareRequest,
   LoadingBlock,
   MarinFactors,
   MaterialPreset,
@@ -35,12 +36,14 @@ import type {
 } from "@/types/fatigue";
 
 interface MaterialFormProps {
-  onSubmit: (request: FatigueAnalysisRequest) => void;
+  onSubmit: (request: FatigueAnalysisCompareRequest) => void;
   isLoading: boolean;
   snCurveSourceMode: SNCurveSourceMode;
   onSNCurveSourceModeChange: (mode: SNCurveSourceMode) => void;
   snPoints: SNFitPoint[];
   onSNPointsChange: (points: SNFitPoint[]) => void;
+  compareWithDeepSeek: boolean;
+  onCompareWithDeepSeekChange: (enabled: boolean) => void;
 }
 
 const defaultMaterial: MaterialProperties = {
@@ -246,6 +249,8 @@ export default function MaterialForm({
   onSNCurveSourceModeChange,
   snPoints,
   onSNPointsChange,
+  compareWithDeepSeek,
+  onCompareWithDeepSeekChange,
 }: MaterialFormProps) {
   const [presets, setPresets] = useState<MaterialPreset[]>([]);
   const [material, setMaterial] = useState<MaterialProperties>(defaultMaterial);
@@ -369,7 +374,7 @@ export default function MaterialForm({
 
   const parseFormValues = (): {
     error: string | null;
-    values?: Parameters<typeof buildFatigueAnalysisRequest>[0];
+    values?: FatigueFormValues;
   } => {
     const uts = parseNumericDraft(materialDrafts.uts);
     const yieldStrength = parseNumericDraft(materialDrafts.yield_strength);
@@ -535,7 +540,16 @@ export default function MaterialForm({
       return;
     }
 
-    const request: FatigueAnalysisRequest = buildFatigueAnalysisRequest(values);
+    const request: FatigueAnalysisCompareRequest = buildFatigueComparisonRequest(
+      values,
+      {
+        enabled: compareWithDeepSeek,
+        include_interpreted_inputs: true,
+        include_sn_curve_points: true,
+        include_goodman_or_haigh_points: true,
+        max_points_per_series: 25,
+      }
+    );
 
     onSubmit(request);
   };
@@ -946,10 +960,31 @@ export default function MaterialForm({
           ) : null}
 
           <div className="flex flex-col gap-3 border-t border-[#e2e8f0] pt-6 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm text-[#475569]">
-              Units are applied directly in the request. Review values before
-              running the analysis.
-            </p>
+            <div className="space-y-3">
+              <p className="text-sm text-[#475569]">
+                Units are applied directly in the request. Review values before
+                running the analysis.
+              </p>
+              <label className="flex items-start gap-3 rounded-2xl border border-[#e2e8f0] bg-[#f8fafc] px-4 py-3">
+                <input
+                  type="checkbox"
+                  checked={compareWithDeepSeek}
+                  onChange={(event) =>
+                    onCompareWithDeepSeekChange(event.target.checked)
+                  }
+                  className="mt-1 h-4 w-4 rounded border-[#94a3b8] text-[#0f766e] focus:ring-[#0f766e]"
+                />
+                <span>
+                  <span className="block text-sm font-semibold text-[#0f172a]">
+                    Compare with DeepSeek
+                  </span>
+                  <span className="block text-sm text-[#475569]">
+                    Run the native backend analysis first and optionally request a
+                    separate JSON comparison through the backend adapter.
+                  </span>
+                </span>
+              </label>
+            </div>
             <Button type="submit" size="lg" disabled={isLoading}>
               {isLoading ? (
                 <>

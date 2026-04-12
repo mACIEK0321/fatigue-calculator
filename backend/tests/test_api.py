@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.models.schemas import AIComparisonResult
 from app.routers import analysis
 
 client = TestClient(app)
@@ -36,6 +37,18 @@ def valid_payload() -> dict:
     }
 
 
+def compare_payload(enabled: bool = True) -> dict:
+    payload = valid_payload()
+    payload["ai_comparison"] = {
+        "enabled": enabled,
+        "include_interpreted_inputs": True,
+        "include_sn_curve_points": True,
+        "include_goodman_or_haigh_points": True,
+        "max_points_per_series": 25,
+    }
+    return payload
+
+
 def test_analyze_endpoint_returns_new_contract() -> None:
     response = client.post("/api/analyze", json=valid_payload())
 
@@ -63,6 +76,104 @@ def test_analyze_endpoint_supports_points_fit() -> None:
 
     assert response.status_code == 200
     assert response.json()["sn_curve_source"]["mode"] == "points_fit"
+
+
+def test_compare_endpoint_returns_native_and_ai_sections(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeDeepSeekClient:
+        async def compare_fatigue_analysis(self, comparison_input: dict):
+            assert comparison_input["surface_factor"]["effective_ka"] > 0
+            return AIComparisonResult(
+                summary="AI comparison summary",
+                assumptions=["Assume room temperature."],
+                interpreted_inputs={
+                    "material_label": None,
+                    "sn_curve_source": "material_basquin",
+                    "surface_factor": 0.82,
+                    "marin_factors": {
+                        "size_factor": 1.0,
+                        "load_factor": 1.0,
+                        "temperature_factor": 1.0,
+                        "reliability_factor": 1.0,
+                    },
+                    "notch_correction_factor": None,
+                    "loading_blocks_count": 0,
+                },
+                basquin_parameters={
+                    "sigma_f_prime": 1050.0,
+                    "b": -0.09,
+                    "source": "material_default_from_uts",
+                },
+                modified_endurance_limit=229.6,
+                stress_state={
+                    "max_stress": 180.0,
+                    "min_stress": -120.0,
+                    "mean_stress": 30.0,
+                    "stress_amplitude": 150.0,
+                    "stress_ratio": -0.667,
+                },
+                mean_stress_result={
+                    "model_name": "goodman",
+                    "effective_mean_stress": 30.0,
+                    "equivalent_alternating_stress": 158.3,
+                    "is_safe": True,
+                },
+                life={
+                    "status": "finite",
+                    "cycles": 2200000.0,
+                    "reason": "Computed from Basquin response.",
+                },
+                safety_factor=1.12,
+                sn_curve_points=[(1e4, 390.0), (1e6, 240.0)],
+                goodman_or_haigh_points=[(0.0, 229.6), (600.0, 0.0)],
+                warnings=[],
+                raw_model_name="deepseek-chat",
+            )
+
+    monkeypatch.setattr(analysis, "get_deepseek_client", lambda: FakeDeepSeekClient())
+
+    response = client.post("/api/analyze/compare", json=compare_payload())
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "native_analysis" in body
+    assert body["native_analysis"]["selected_life"]["status"] == "infinite"
+    assert body["ai_comparison"]["status"] == "success"
+    assert body["ai_comparison"]["result"]["raw_model_name"] == "deepseek-chat"
+
+
+def test_compare_endpoint_preserves_native_analysis_when_ai_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeDeepSeekClient:
+        async def compare_fatigue_analysis(self, comparison_input: dict):
+            raise analysis.DeepSeekClientError(
+                code=analysis.AIComparisonErrorCode.timeout,
+                message="DeepSeek comparison timed out before a valid response arrived.",
+                retriable=True,
+            )
+
+    monkeypatch.setattr(analysis, "get_deepseek_client", lambda: FakeDeepSeekClient())
+
+    response = client.post("/api/analyze/compare", json=compare_payload())
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["native_analysis"]["selected_life"]["status"] == "infinite"
+    assert body["ai_comparison"]["status"] == "error"
+    assert body["ai_comparison"]["error"]["code"] == "timeout"
+    assert body["ai_comparison"]["error"]["retriable"] is True
+
+
+def test_compare_endpoint_marks_skipped_when_ai_disabled() -> None:
+    response = client.post("/api/analyze/compare", json=compare_payload(enabled=False))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["native_analysis"]["selected_life"]["status"] == "infinite"
+    assert body["ai_comparison"]["status"] == "skipped"
+    assert body["ai_comparison"]["error"]["code"] == "disabled"
 
 
 def test_analyze_endpoint_supports_notch_with_points_fit_and_loading_blocks() -> None:

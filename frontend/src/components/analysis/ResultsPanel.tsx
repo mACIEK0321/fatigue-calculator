@@ -4,6 +4,8 @@ import React from "react";
 import { ShieldAlert, ShieldCheck } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type {
+  AIComparisonEnvelope,
+  AIComparisonLife,
   FatigueAnalysisResponse,
   FatigueLifeResult,
   MeanStressCorrectionResult,
@@ -11,6 +13,9 @@ import type {
 
 interface ResultsPanelProps {
   results: FatigueAnalysisResponse | null;
+  aiComparison: AIComparisonEnvelope | null;
+  isLoading: boolean;
+  showAIComparison: boolean;
 }
 
 function formatCycles(value: number): string {
@@ -22,6 +27,12 @@ function formatCycles(value: number): string {
 }
 
 function formatLife(life: FatigueLifeResult): string {
+  if (life.status === "infinite") return "Infinite life";
+  if (!life.cycles || life.cycles <= 0) return "Immediate failure";
+  return `${formatCycles(life.cycles)} cycles`;
+}
+
+function formatAIComparisonLife(life: AIComparisonLife): string {
   if (life.status === "infinite") return "Infinite life";
   if (!life.cycles || life.cycles <= 0) return "Immediate failure";
   return `${formatCycles(life.cycles)} cycles`;
@@ -51,7 +62,12 @@ function getStatusLabel(
   return isSafe ? "Safe" : "Unsafe";
 }
 
-export default function ResultsPanel({ results }: ResultsPanelProps) {
+export default function ResultsPanel({
+  results,
+  aiComparison,
+  isLoading,
+  showAIComparison,
+}: ResultsPanelProps) {
   if (!results) {
     return (
       <Card className="border-slate-200 bg-white shadow-sm">
@@ -61,8 +77,17 @@ export default function ResultsPanel({ results }: ResultsPanelProps) {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex h-32 items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50 text-sm text-slate-500">
-            Run an analysis to see results.
+          <div className="space-y-3">
+            <div className="flex h-32 items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50 text-sm text-slate-500">
+              Run an analysis to see results.
+            </div>
+            {showAIComparison ? (
+              <div className="rounded-xl border border-dashed border-[#99f6e4] bg-[#f0fdfa] px-4 py-3 text-sm text-[#115e59]">
+                {isLoading
+                  ? "DeepSeek comparison requested. The backend is preparing the native result and the optional AI JSON response."
+                  : "DeepSeek comparison is enabled. A comparison card will appear here after the next run."}
+              </div>
+            ) : null}
           </div>
         </CardContent>
       </Card>
@@ -245,8 +270,14 @@ export default function ResultsPanel({ results }: ResultsPanelProps) {
                 ? "S-N points + fit"
                 : "Basquin parameters"}
             </p>
+            {curveSource.mode === "points_fit" && curveSource.basquin_fit ? (
+              <p className="mt-1 text-sm text-slate-600">
+                Backend fit R^2 = {curveSource.basquin_fit.r_squared.toFixed(4)} from{" "}
+                {curveSource.basquin_fit.points_used} valid points.
+              </p>
+            ) : null}
             <p className="mt-1 text-sm text-slate-600">
-              σf&apos; = {curveSource.basquin_parameters.sigma_f_prime.toFixed(1)} MPa, b ={" "}
+              sigma_f&apos; = {curveSource.basquin_parameters.sigma_f_prime.toFixed(1)} MPa, b ={" "}
               {curveSource.basquin_parameters.b.toFixed(4)}
             </p>
           </div>
@@ -260,9 +291,132 @@ export default function ResultsPanel({ results }: ResultsPanelProps) {
             <p className="mt-1 text-sm text-slate-600">
               Basquin source: {curveSource.basquin_parameters.source}
             </p>
+            <p className="mt-1 text-sm text-slate-600">
+              Final chart and life result use the backend response, not the local
+              form preview.
+            </p>
           </div>
         </CardContent>
       </Card>
+
+      {showAIComparison ? (
+        <Card className="border-slate-200 bg-white shadow-sm">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base text-slate-900">
+              DeepSeek comparison
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {aiComparison?.status === "success" && aiComparison.result ? (
+              <>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-slate-500">
+                      Life comparison
+                    </p>
+                    <p className="mt-2 text-sm text-slate-600">
+                      Native: {formatLife(results.selected_life)}
+                    </p>
+                    <p className="mt-1 text-sm text-slate-900">
+                      DeepSeek: {formatAIComparisonLife(aiComparison.result.life)}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-slate-500">
+                      Safety factor comparison
+                    </p>
+                    <p className="mt-2 text-sm text-slate-600">
+                      Native: {results.selected_mean_stress_result.safety_factor.toFixed(3)}
+                    </p>
+                    <p className="mt-1 text-sm text-slate-900">
+                      DeepSeek:{" "}
+                      {aiComparison.result.safety_factor === null ||
+                      aiComparison.result.safety_factor === undefined
+                        ? "N/A"
+                        : aiComparison.result.safety_factor.toFixed(3)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-slate-500">
+                      Basquin parameters
+                    </p>
+                    <p className="mt-2 text-sm text-slate-600">
+                      Native: sigma_f&apos; ={" "}
+                      {results.sn_curve_source.basquin_parameters.sigma_f_prime.toFixed(1)} MPa, b ={" "}
+                      {results.sn_curve_source.basquin_parameters.b.toFixed(4)}
+                    </p>
+                    <p className="mt-1 text-sm text-slate-900">
+                      DeepSeek:{" "}
+                      {aiComparison.result.basquin_parameters.sigma_f_prime !== null &&
+                      aiComparison.result.basquin_parameters.sigma_f_prime !== undefined &&
+                      aiComparison.result.basquin_parameters.b !== null &&
+                      aiComparison.result.basquin_parameters.b !== undefined
+                        ? `sigma_f' = ${aiComparison.result.basquin_parameters.sigma_f_prime.toFixed(1)} MPa, b = ${aiComparison.result.basquin_parameters.b.toFixed(4)}`
+                        : "N/A"}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Model: {aiComparison.result.raw_model_name}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-slate-500">
+                      AI summary
+                    </p>
+                    <p className="mt-2 text-sm text-slate-900">
+                      {aiComparison.result.summary}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-slate-500">
+                      Assumptions
+                    </p>
+                    <div className="mt-2 space-y-1 text-sm text-slate-700">
+                      {aiComparison.result.assumptions.length > 0 ? (
+                        aiComparison.result.assumptions.map((assumption, index) => (
+                          <p key={`${assumption}-${index}`}>{assumption}</p>
+                        ))
+                      ) : (
+                        <p>No explicit assumptions returned.</p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-slate-500">
+                      Warnings
+                    </p>
+                    <div className="mt-2 space-y-1 text-sm text-slate-700">
+                      {aiComparison.result.warnings.length > 0 ? (
+                        aiComparison.result.warnings.map((warning, index) => (
+                          <p key={`${warning}-${index}`}>{warning}</p>
+                        ))
+                      ) : (
+                        <p>No AI warnings returned.</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </>
+            ) : aiComparison?.status === "error" && aiComparison.error ? (
+              <div className="rounded-xl border border-[#fed7aa] bg-[#fff7ed] px-4 py-3 text-sm text-[#9a3412]">
+                <p className="font-semibold">DeepSeek comparison unavailable</p>
+                <p className="mt-1">{aiComparison.error.message}</p>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
+                {isLoading
+                  ? "Waiting for the optional DeepSeek comparison."
+                  : "DeepSeek comparison was skipped for this run."}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      ) : null}
 
       {results.notch_result ? (
         <Card className="border-slate-200 bg-white shadow-sm">

@@ -20,15 +20,15 @@ import type { TooltipProps, TooltipValueType } from "recharts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  buildBasquinCurve,
+  DISPLAY_SN_CURVE_MAX_CYCLES,
+  DISPLAY_SN_CURVE_MIN_CYCLES,
+  fitBasquinFromPoints,
+  sanitizeSNFitPoints,
+} from "@/lib/basquin-fit";
 import { mapSNChartPositionToPoint } from "@/lib/sn-chart";
 import type { SNFitPoint } from "@/types/fatigue";
-
-interface BasquinFitDraft {
-  sigma_f_prime: number;
-  b: number;
-  a: number;
-  rSquared: number;
-}
 
 interface SNInteractiveInputProps {
   points: SNFitPoint[];
@@ -36,8 +36,8 @@ interface SNInteractiveInputProps {
 }
 
 const CHART_MARGINS = { top: 20, right: 24, left: 40, bottom: 28 };
-const X_MIN = 1;
-const X_MAX = 1e9;
+const X_MIN = DISPLAY_SN_CURVE_MIN_CYCLES;
+const X_MAX = DISPLAY_SN_CURVE_MAX_CYCLES;
 
 type TooltipFormatter = NonNullable<
   TooltipProps<TooltipValueType, string | number>["formatter"]
@@ -55,50 +55,10 @@ const tooltipFormatter: TooltipFormatter = (value, name) => {
   return [normalized, name ?? "value"];
 };
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
-
 function formatLogTick(value: number): string {
   if (value <= 0) return "0";
   const exponent = Math.round(Math.log10(value));
   return `10^${exponent}`;
-}
-
-function fitBasquin(points: SNFitPoint[]): BasquinFitDraft | null {
-  if (points.length < 2) return null;
-
-  const x = points.map((point) => Math.log10(point.cycles));
-  const y = points.map((point) => Math.log10(point.stress));
-
-  const xMean = x.reduce((sum, value) => sum + value, 0) / x.length;
-  const yMean = y.reduce((sum, value) => sum + value, 0) / y.length;
-
-  const numerator = x.reduce((sum, value, index) => {
-    return sum + (value - xMean) * (y[index] - yMean);
-  }, 0);
-  const denominator = x.reduce((sum, value) => sum + (value - xMean) ** 2, 0);
-
-  if (Math.abs(denominator) < 1e-12) return null;
-
-  const b = numerator / denominator;
-  if (!Number.isFinite(b) || b >= 0) return null;
-
-  const intercept = yMean - b * xMean;
-  const a = 10 ** intercept;
-  const sigma_f_prime = a / 2 ** b;
-
-  const yPred = x.map((value) => intercept + b * value);
-  const ssRes = y.reduce((sum, value, index) => sum + (value - yPred[index]) ** 2, 0);
-  const ssTot = y.reduce((sum, value) => sum + (value - yMean) ** 2, 0);
-  const rSquared = ssTot <= 1e-12 ? 1 : 1 - ssRes / ssTot;
-
-  return {
-    sigma_f_prime,
-    b,
-    a,
-    rSquared: clamp(rSquared, 0, 1),
-  };
 }
 
 function FieldHeader({
@@ -125,29 +85,19 @@ export default function SNInteractiveInput({
   points,
   onPointsChange,
 }: SNInteractiveInputProps) {
-  const sanitizedPoints = useMemo(
-    () => points.filter((point) => point.cycles > 0 && point.stress > 0),
-    [points]
+  const sanitizedPoints = useMemo(() => sanitizeSNFitPoints(points), [points]);
+  const ignoredPointsCount = points.length - sanitizedPoints.length;
+  const fit = useMemo(
+    () => fitBasquinFromPoints(sanitizedPoints),
+    [sanitizedPoints]
   );
-  const fit = useMemo(() => fitBasquin(sanitizedPoints), [sanitizedPoints]);
 
   const fitCurve = useMemo<SNFitPoint[]>(() => {
-    if (!fit) return [];
-
-    const curve: SNFitPoint[] = [];
-    for (let index = 0; index <= 60; index += 1) {
-      const fraction = index / 60;
-      const logN =
-        Math.log10(X_MIN) +
-        fraction * (Math.log10(X_MAX) - Math.log10(X_MIN));
-      const cycles = 10 ** logN;
-      const stress = fit.a * cycles ** fit.b;
-      if (stress > 0 && Number.isFinite(stress)) {
-        curve.push({ cycles, stress });
-      }
+    if (!fit) {
+      return [];
     }
 
-    return curve;
+    return buildBasquinCurve(fit.sigma_f_prime, fit.b);
   }, [fit]);
 
   const yDomain = useMemo<[number, number]>(() => {
@@ -253,11 +203,12 @@ export default function SNInteractiveInput({
           </p>
           <p className="mt-1 text-lg font-semibold text-[#0f172a]">
             {sanitizedPoints.length}
+            {ignoredPointsCount > 0 ? ` (${ignoredPointsCount} ignored)` : ""}
           </p>
         </div>
         <div>
           <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[#475569]">
-            σf&apos;
+            sigma_f&apos;
           </p>
           <p className="mt-1 text-lg font-semibold text-[#0f172a]">
             {fit ? `${fit.sigma_f_prime.toFixed(1)} MPa` : "Pending"}
@@ -275,13 +226,28 @@ export default function SNInteractiveInput({
 
       <div className="overflow-hidden rounded-2xl border border-[#e2e8f0] bg-white p-4">
         <div className="mb-3 flex items-center justify-between gap-3">
-          <p className="text-sm font-semibold text-[#0f172a]">
-            S-N fit preview
-          </p>
+          <div>
+            <p className="text-sm font-semibold text-[#0f172a]">
+              Preliminary S-N fit preview
+            </p>
+            <p className="text-xs text-[#64748b]">
+              Uses the same log10-log10 Basquin regression as the backend. Final
+              analysis also applies the modified endurance limit and operating
+              point selection.
+            </p>
+          </div>
           <p className="text-sm text-[#475569]">
-            {fit ? `R² = ${fit.rSquared.toFixed(4)}` : "Awaiting valid points"}
+            {fit
+              ? `R^2 = ${fit.r_squared.toFixed(4)} from ${fit.points_used} points`
+              : "Awaiting valid points"}
           </p>
         </div>
+        {ignoredPointsCount > 0 ? (
+          <p className="mb-3 text-xs text-[#b45309]">
+            Non-positive points stay visible in the table but are ignored by the
+            preview and by the backend request.
+          </p>
+        ) : null}
         <div className="h-[300px] w-full cursor-crosshair">
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart margin={CHART_MARGINS}>

@@ -49,6 +49,22 @@ def test_fit_basquin_from_points_requires_negative_exponent() -> None:
         )
 
 
+def test_fit_basquin_from_points_matches_expected_points_fit_parameters() -> None:
+    fit = fit_basquin_from_points(
+        [
+            SNDataPoint(cycles=1e4, stress=420.0),
+            SNDataPoint(cycles=1e5, stress=320.0),
+            SNDataPoint(cycles=1e6, stress=245.0),
+        ]
+    )
+
+    assert fit.a == pytest.approx(1233.284100972462)
+    assert fit.b == pytest.approx(-0.11704160301668387)
+    assert fit.sigma_f_prime == pytest.approx(1337.5073153506498)
+    assert fit.r_squared == pytest.approx(0.9999727780739391)
+    assert fit.points_used == 3
+
+
 def test_goodman_ignores_compressive_mean_stress() -> None:
     negative_mean = goodman_correction(
         stress_amplitude=100.0,
@@ -110,6 +126,14 @@ def test_points_fit_mode_is_explicit() -> None:
     assert result["sn_curve_source"]["mode"] == "points_fit"
     assert result["sn_curve_source"]["basquin_parameters"]["source"] == "points_fit"
     assert result["sn_curve_source"]["basquin_fit"]["points_used"] == 3
+    assert result["sn_curve_source"]["basquin_parameters"]["sigma_f_prime"] == pytest.approx(
+        result["sn_curve_source"]["basquin_fit"]["sigma_f_prime"]
+    )
+    assert result["sn_curve_source"]["basquin_parameters"]["b"] == pytest.approx(
+        result["sn_curve_source"]["basquin_fit"]["b"]
+    )
+    assert result["sn_chart"]["curve"][0]["cycles"] == pytest.approx(1.0)
+    assert result["sn_chart"]["curve"][-1]["cycles"] == pytest.approx(1e9)
 
 
 def test_infinite_life_is_returned_semantically_when_sa_below_se() -> None:
