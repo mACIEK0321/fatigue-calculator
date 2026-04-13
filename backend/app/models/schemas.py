@@ -57,6 +57,35 @@ class AIComparisonErrorCode(str, Enum):
     unexpected_error = "unexpected_error"
 
 
+class StressImageDetectedQuantity(str, Enum):
+    von_mises = "von_mises"
+    equivalent_stress = "equivalent_stress"
+    unknown = "unknown"
+
+
+class ConfidenceLevel(str, Enum):
+    high = "high"
+    medium = "medium"
+    low = "low"
+
+
+class AIInterpretationStatus(str, Enum):
+    success = "success"
+    error = "error"
+    skipped = "skipped"
+
+
+class AIInterpretationErrorCode(str, Enum):
+    disabled = "disabled"
+    not_configured = "not_configured"
+    timeout = "timeout"
+    http_error = "http_error"
+    empty_response = "empty_response"
+    invalid_json = "invalid_json"
+    schema_validation = "schema_validation"
+    unexpected_error = "unexpected_error"
+
+
 class MaterialProperties(BaseModel):
     uts: float = Field(..., description="Ultimate tensile strength in MPa", gt=0)
     yield_strength: float = Field(..., description="Yield strength in MPa", gt=0)
@@ -188,6 +217,45 @@ class SurfaceFinishInput(BaseModel):
     uts: float = Field(..., description="Ultimate tensile strength in MPa", gt=0)
 
 
+class StressImageReadResponse(BaseModel):
+    success: bool = Field(
+        ...,
+        description="Whether the image produced a reliable enough stress reading",
+    )
+    detected_quantity: StressImageDetectedQuantity = Field(
+        ...,
+        description="Detected stress quantity, with preference for von Mises/equivalent stress",
+    )
+    detected_label: Optional[str] = Field(
+        None,
+        description="Visible legend/header label when readable",
+    )
+    detected_unit: str = Field(
+        ...,
+        description="Detected stress unit, or 'unknown' when unreadable",
+    )
+    max_value: Optional[float] = Field(
+        None,
+        description="Maximum visible stress value when readable",
+    )
+    min_value: Optional[float] = Field(
+        None,
+        description="Minimum visible stress value when readable",
+    )
+    confidence: ConfidenceLevel = Field(
+        ...,
+        description="Confidence of the extracted reading",
+    )
+    notes: list[str] = Field(
+        default_factory=list,
+        description="Short diagnostic notes about visibility and confidence",
+    )
+    is_usable_for_prefill: bool = Field(
+        ...,
+        description="Whether the reading is safe to offer as a form prefill suggestion",
+    )
+
+
 class FatigueAnalysisRequest(BaseModel):
     max_stress: float = Field(..., description="Maximum cyclic stress in MPa")
     min_stress: float = Field(..., description="Minimum cyclic stress in MPa")
@@ -267,6 +335,24 @@ class FatigueAnalysisCompareRequest(FatigueAnalysisRequest):
     ai_comparison: AIComparisonOptions = Field(
         default_factory=AIComparisonOptions,
         description="Optional AI comparison configuration",
+    )
+
+
+class AIInterpretationOptions(BaseModel):
+    enabled: bool = Field(
+        False,
+        description="Whether to request optional AI interpretation through the backend",
+    )
+
+
+class FatigueAnalysisInterpretRequest(FatigueAnalysisRequest):
+    ai_interpretation: AIInterpretationOptions = Field(
+        default_factory=AIInterpretationOptions,
+        description="Optional AI interpretation configuration",
+    )
+    vision_context: Optional[StressImageReadResponse] = Field(
+        None,
+        description="Optional stress reading extracted from an uploaded image",
     )
 
 
@@ -607,6 +693,93 @@ class AIComparisonValidationIssue(BaseModel):
     )
 
 
+class AIInterpretationResult(BaseModel):
+    summary: str = Field(
+        ...,
+        description="Concise narrative summary of the native fatigue result",
+    )
+    key_findings: list[str] = Field(
+        default_factory=list,
+        description="Most important engineering takeaways from the result",
+    )
+    warnings: list[str] = Field(
+        default_factory=list,
+        description="Cautions or data-quality concerns raised by the AI",
+    )
+    engineering_notes: list[str] = Field(
+        default_factory=list,
+        description="Short practical notes for engineering review",
+    )
+    raw_model_name: str = Field(
+        ...,
+        description="Exact upstream model identifier reported by the AI provider",
+    )
+
+
+class AIInterpretationError(BaseModel):
+    code: AIInterpretationErrorCode = Field(
+        ...,
+        description="Normalized AI interpretation error code",
+    )
+    message: str = Field(..., description="Human-readable diagnostic message")
+    retriable: bool = Field(
+        False,
+        description="Whether retrying the AI request could plausibly succeed",
+    )
+
+
+class AIInterpretationMetadata(BaseModel):
+    response_format: Optional[str] = Field(
+        None,
+        description="Groq response_format mode that produced the final response",
+    )
+    attempted_response_formats: list[str] = Field(
+        default_factory=list,
+        description="Ordered response_format modes attempted for this interpretation",
+    )
+    fallback_used: bool = Field(
+        False,
+        description="Whether the backend retried with a fallback response_format",
+    )
+    problematic_fields: list[str] = Field(
+        default_factory=list,
+        description="Top-level fields that triggered backend AI schema validation issues",
+    )
+    validation_issue_count: int = Field(
+        0,
+        description="Number of backend validation issues observed for the AI payload",
+        ge=0,
+    )
+    validation_issues: list[AIComparisonValidationIssue] = Field(
+        default_factory=list,
+        description="Sanitized backend validation diagnostics for the AI payload",
+    )
+
+
+class AIInterpretationEnvelope(BaseModel):
+    provider: str = Field(..., description="AI provider identifier")
+    enabled: bool = Field(
+        ...,
+        description="Whether the user requested the AI interpretation",
+    )
+    status: AIInterpretationStatus = Field(
+        ...,
+        description="Overall AI interpretation status",
+    )
+    result: Optional[AIInterpretationResult] = Field(
+        None,
+        description="Structured AI interpretation result on success",
+    )
+    error: Optional[AIInterpretationError] = Field(
+        None,
+        description="Normalized AI interpretation error on failure or skip",
+    )
+    metadata: Optional[AIInterpretationMetadata] = Field(
+        None,
+        description="Optional diagnostics for the AI interpretation request path",
+    )
+
+
 class AIComparisonResult(BaseModel):
     summary: str = Field(..., description="Concise textual summary of the AI interpretation")
     assumptions: Optional[list[str]] = Field(
@@ -759,4 +932,15 @@ class FatigueAnalysisCompareResponse(BaseModel):
     ai_comparison: AIComparisonEnvelope = Field(
         ...,
         description="Optional AI comparison payload and status",
+    )
+
+
+class FatigueAnalysisInterpretResponse(BaseModel):
+    native_analysis: FatigueAnalysisResponse = Field(
+        ...,
+        description="Native backend fatigue analysis result",
+    )
+    ai_interpretation: AIInterpretationEnvelope = Field(
+        ...,
+        description="Optional AI interpretation payload and status",
     )

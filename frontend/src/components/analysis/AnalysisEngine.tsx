@@ -5,20 +5,20 @@ import GoodmanDiagram from "./GoodmanDiagram";
 import MaterialForm from "./MaterialForm";
 import ResultsPanel from "./ResultsPanel";
 import SNChart from "./SNChart";
-import { ApiError, analyzeFatigueComparison } from "@/lib/api";
+import { ApiError, analyzeFatigueInterpretation } from "@/lib/api";
 import type {
-  FatigueAnalysisCompareRequest,
-  FatigueAnalysisCompareResponse,
+  FatigueAnalysisInterpretRequest,
+  FatigueAnalysisInterpretResponse,
   SNCurveSourceMode,
   SNFitPoint,
 } from "@/types/fatigue";
 
 export default function AnalysisEngine() {
   const [response, setResponse] =
-    useState<FatigueAnalysisCompareResponse | null>(null);
+    useState<FatigueAnalysisInterpretResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [compareWithAI, setCompareWithAI] = useState(false);
+  const [includeAIInterpretation, setIncludeAIInterpretation] = useState(false);
   const [snCurveSourceMode, setSnCurveSourceMode] =
     useState<SNCurveSourceMode>("material_basquin");
   const [snPoints, setSnPoints] = useState<SNFitPoint[]>([
@@ -27,12 +27,12 @@ export default function AnalysisEngine() {
     { cycles: 1e6, stress: 245 },
   ]);
 
-  const handleSubmit = async (request: FatigueAnalysisCompareRequest) => {
+  const handleSubmit = async (request: FatigueAnalysisInterpretRequest) => {
     setIsLoading(true);
     setError(null);
 
     try {
-      const result = await analyzeFatigueComparison(request);
+      const result = await analyzeFatigueInterpretation(request);
       setResponse(result);
     } catch (err) {
       if (err instanceof ApiError) {
@@ -64,14 +64,14 @@ export default function AnalysisEngine() {
           onSNCurveSourceModeChange={setSnCurveSourceMode}
           snPoints={snPoints}
           onSNPointsChange={setSnPoints}
-          compareWithAI={compareWithAI}
-          onCompareWithAIChange={setCompareWithAI}
+          includeAIInterpretation={includeAIInterpretation}
+          onIncludeAIInterpretationChange={setIncludeAIInterpretation}
         />
         <ResultsPanel
           results={response?.native_analysis ?? null}
-          aiComparison={response?.ai_comparison ?? null}
+          aiInterpretation={response?.ai_interpretation ?? null}
           isLoading={isLoading}
-          showAIComparison={compareWithAI}
+          showAIInterpretation={includeAIInterpretation}
         />
       </section>
 
@@ -79,7 +79,6 @@ export default function AnalysisEngine() {
         <SNChart
           chartData={response?.native_analysis.sn_chart ?? null}
           curveSource={response?.native_analysis.sn_curve_source ?? null}
-          aiComparison={response?.ai_comparison ?? null}
         />
         <GoodmanDiagram
           diagram={response?.native_analysis.haigh_diagram ?? null}

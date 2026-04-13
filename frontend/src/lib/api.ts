@@ -1,9 +1,12 @@
 import type {
   FatigueAnalysisCompareRequest,
   FatigueAnalysisCompareResponse,
+  FatigueAnalysisInterpretRequest,
+  FatigueAnalysisInterpretResponse,
   FatigueAnalysisRequest,
   FatigueAnalysisResponse,
   MaterialPreset,
+  StressImageReadResponse,
   SurfaceFinishInput,
 } from "@/types/fatigue";
 
@@ -54,13 +57,17 @@ async function parseErrorDetail(response: Response): Promise<string> {
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   let response: Response;
+  const isFormData = options?.body instanceof FormData;
 
   try {
     response = await fetch(`${resolveApiBaseUrl()}${path}`, {
-      headers: {
-        "Content-Type": "application/json",
-      },
       ...options,
+      headers: isFormData
+        ? options?.headers
+        : {
+            "Content-Type": "application/json",
+            ...(options?.headers ?? {}),
+          },
     });
   } catch {
     throw new Error(
@@ -90,6 +97,27 @@ export async function analyzeFatigueComparison(
   return apiFetch<FatigueAnalysisCompareResponse>("/analyze/compare", {
     method: "POST",
     body: JSON.stringify(request),
+  });
+}
+
+export async function analyzeFatigueInterpretation(
+  request: FatigueAnalysisInterpretRequest
+): Promise<FatigueAnalysisInterpretResponse> {
+  return apiFetch<FatigueAnalysisInterpretResponse>("/analyze/interpret", {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+}
+
+export async function readStressFromImage(
+  file: File
+): Promise<StressImageReadResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  return apiFetch<StressImageReadResponse>("/vision/stress-from-image", {
+    method: "POST",
+    body: formData,
   });
 }
 

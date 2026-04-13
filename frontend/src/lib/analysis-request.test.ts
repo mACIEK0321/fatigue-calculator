@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildFatigueAnalysisRequest,
   buildFatigueComparisonRequest,
+  buildFatigueInterpretationRequest,
 } from "@/lib/analysis-request";
 
 describe("buildFatigueAnalysisRequest", () => {
@@ -144,5 +145,56 @@ describe("buildFatigueAnalysisRequest", () => {
       mode: "empirical_surface_finish",
       finish_type: "machined",
     });
+  });
+
+  it("wraps the normalized native request with AI interpretation and vision context", () => {
+    const request = buildFatigueInterpretationRequest(
+      {
+        material: {
+          uts: 600,
+          yield_strength: 400,
+          endurance_limit: 280,
+          elastic_modulus: 210,
+        },
+        maxStress: 180,
+        minStress: -120,
+        snCurveSourceMode: "material_basquin",
+        snPoints: [],
+        surfaceFactorMode: "empirical_surface_finish",
+        surfaceFinish: "machined",
+        manualSurfaceFactor: 0.85,
+        marinFactors: {
+          size_factor: 1,
+          load_factor: 1,
+          temperature_factor: 1,
+          reliability_factor: 1,
+        },
+        selectedModel: "goodman",
+        useNotch: false,
+        notch: {
+          model: "neuber",
+          kt: 1,
+          notch_radius_mm: 1,
+          notch_constant_mm: 0.25,
+        },
+        loadingBlocks: [],
+      },
+      { enabled: true },
+      {
+        success: true,
+        detected_quantity: "von_mises",
+        detected_label: "Equivalent Stress",
+        detected_unit: "MPa",
+        max_value: 182.4,
+        min_value: 10,
+        confidence: "high",
+        notes: ["Legend visible"],
+        is_usable_for_prefill: true,
+      }
+    );
+
+    expect(request.ai_interpretation).toStrictEqual({ enabled: true });
+    expect(request.vision_context?.max_value).toBe(182.4);
+    expect(request.max_stress).toBe(180);
   });
 });

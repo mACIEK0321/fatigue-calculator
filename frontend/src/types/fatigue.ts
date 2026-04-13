@@ -20,6 +20,7 @@ export type SNCurveSourceMode = "material_basquin" | "points_fit";
 
 export type FatigueLifeStatus = "finite" | "infinite";
 export type AIComparisonStatus = "success" | "error" | "skipped";
+export type AIInterpretationStatus = "success" | "error" | "skipped";
 export type AIComparisonErrorCode =
   | "disabled"
   | "not_configured"
@@ -29,6 +30,20 @@ export type AIComparisonErrorCode =
   | "invalid_json"
   | "schema_validation"
   | "unexpected_error";
+export type AIInterpretationErrorCode =
+  | "disabled"
+  | "not_configured"
+  | "timeout"
+  | "http_error"
+  | "empty_response"
+  | "invalid_json"
+  | "schema_validation"
+  | "unexpected_error";
+export type StressImageDetectedQuantity =
+  | "von_mises"
+  | "equivalent_stress"
+  | "unknown";
+export type ConfidenceLevel = "high" | "medium" | "low";
 
 export interface MaterialProperties {
   uts: number;
@@ -101,6 +116,27 @@ export interface AIComparisonOptions {
 
 export interface FatigueAnalysisCompareRequest extends FatigueAnalysisRequest {
   ai_comparison: AIComparisonOptions;
+}
+
+export interface StressImageReadResponse {
+  success: boolean;
+  detected_quantity: StressImageDetectedQuantity;
+  detected_label?: string | null;
+  detected_unit: string;
+  max_value?: number | null;
+  min_value?: number | null;
+  confidence: ConfidenceLevel;
+  notes: string[];
+  is_usable_for_prefill: boolean;
+}
+
+export interface AIInterpretationOptions {
+  enabled: boolean;
+}
+
+export interface FatigueAnalysisInterpretRequest extends FatigueAnalysisRequest {
+  ai_interpretation: AIInterpretationOptions;
+  vision_context?: StressImageReadResponse;
 }
 
 export interface FatigueLifeResult {
@@ -320,6 +356,52 @@ export interface AIComparisonEnvelope {
 export interface FatigueAnalysisCompareResponse {
   native_analysis: FatigueAnalysisResponse;
   ai_comparison: AIComparisonEnvelope;
+}
+
+export interface AIInterpretationResult {
+  summary: string;
+  key_findings: string[];
+  warnings: string[];
+  engineering_notes: string[];
+  raw_model_name: string;
+}
+
+export interface AIInterpretationError {
+  code: AIInterpretationErrorCode;
+  message: string;
+  retriable: boolean;
+}
+
+export interface AIInterpretationValidationIssue {
+  field_path: string;
+  expected_type?: string | null;
+  actual_type?: string | null;
+  error_type: string;
+  missing: boolean;
+  wrong_shape: boolean;
+}
+
+export interface AIInterpretationMetadata {
+  response_format?: string | null;
+  attempted_response_formats: string[];
+  fallback_used: boolean;
+  problematic_fields: string[];
+  validation_issue_count: number;
+  validation_issues: AIInterpretationValidationIssue[];
+}
+
+export interface AIInterpretationEnvelope {
+  provider: string;
+  enabled: boolean;
+  status: AIInterpretationStatus;
+  result?: AIInterpretationResult | null;
+  error?: AIInterpretationError | null;
+  metadata?: AIInterpretationMetadata | null;
+}
+
+export interface FatigueAnalysisInterpretResponse {
+  native_analysis: FatigueAnalysisResponse;
+  ai_interpretation: AIInterpretationEnvelope;
 }
 
 export interface SurfaceFinishInput {

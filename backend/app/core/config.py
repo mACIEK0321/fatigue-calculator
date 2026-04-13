@@ -35,6 +35,7 @@ class Settings:
     GROQ_API_KEY: str | None
     GROQ_BASE_URL: str
     GROQ_MODEL: str
+    GROQ_VISION_MODEL: str
     GROQ_RESPONSE_FORMAT: str
     GROQ_TIMEOUT_SECONDS: float
 
@@ -67,6 +68,11 @@ def get_settings() -> Settings:
         ),
         GROQ_MODEL=(
             os.getenv("GROQ_MODEL", "openai/gpt-oss-20b").strip()
+            or "openai/gpt-oss-20b"
+        ),
+        GROQ_VISION_MODEL=(
+            os.getenv("GROQ_VISION_MODEL", "").strip()
+            or os.getenv("GROQ_MODEL", "openai/gpt-oss-20b").strip()
             or "openai/gpt-oss-20b"
         ),
         GROQ_RESPONSE_FORMAT=groq_response_format,

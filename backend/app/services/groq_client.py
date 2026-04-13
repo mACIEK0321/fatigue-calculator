@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from collections import Counter
 import json
 import logging
@@ -9,14 +10,23 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from app.core.config import Settings
 from app.models.schemas import (
     AIComparisonErrorCode,
+    AIInterpretationMetadata,
+    AIInterpretationResult,
     AIComparisonMetadata,
     AIComparisonResult,
     AIComparisonValidationIssue,
+    StressImageReadResponse,
+)
+from app.services.groq_interpretation import (
+    GROQ_INTERPRETATION_JSON_SCHEMA,
+    INTERPRETATION_TOP_LEVEL_FIELDS,
+    build_interpretation_system_prompt,
+    build_interpretation_user_prompt,
 )
 from app.services.groq_prompt import (
     GROQ_DEFAULT_SCHEMA_PROFILE,
@@ -28,6 +38,12 @@ from app.services.groq_prompt import (
     get_schema_for_profile,
     get_tracked_top_level_fields,
     is_simplified_schema_profile,
+)
+from app.services.groq_vision import (
+    GROQ_VISION_JSON_SCHEMA,
+    VISION_TRACKED_TOP_LEVEL_FIELDS,
+    build_vision_system_prompt,
+    build_vision_user_text,
 )
 
 logger = logging.getLogger(__name__)
@@ -60,6 +76,12 @@ class GroqClientError(Exception):
 class GroqComparisonResponse:
     result: AIComparisonResult
     metadata: AIComparisonMetadata
+
+
+@dataclass(frozen=True)
+class GroqInterpretationResponse:
+    result: AIInterpretationResult
+    metadata: AIInterpretationMetadata
 
 
 @dataclass(frozen=True)
@@ -112,6 +134,174 @@ class GroqClient:
                 },
             ],
         }
+
+    async def interpret_fatigue_analysis(
+        self,
+        interpretation_input: dict,
+    ) -> GroqInterpretationResponse:
+        if not self.is_configured:
+            raise GroqClientError(
+                code=AIComparisonErrorCode.not_configured,
+                message="AI interpretation is not configured on the backend.",
+                retriable=False,
+            )
+
+        attempted_response_formats: list[str] = []
+        validation_issues: list[AIComparisonValidationIssue] = []
+        problematic_fields: list[str] = []
+
+        for response_format in self._resolve_response_formats():
+            attempted_response_formats.append(response_format)
+            payload = self._build_generic_chat_payload(
+                model_name=self._settings.GROQ_MODEL,
+                response_format=response_format,
+                schema_name="fatigue_ai_interpretation",
+                schema=GROQ_INTERPRETATION_JSON_SCHEMA,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": build_interpretation_system_prompt(response_format),
+                    },
+                    {
+                        "role": "user",
+                        "content": build_interpretation_user_prompt(
+                            interpretation_input,
+                            model_name=self._settings.GROQ_MODEL,
+                        ),
+                    },
+                ],
+            )
+
+            try:
+                response_payload = await self._post_chat_completion(
+                    payload,
+                    response_format=response_format,
+                    schema_profile="interpretation_v1",
+                )
+                result, _ = self._validate_typed_response_payload(
+                    response_payload,
+                    response_model=AIInterpretationResult,
+                    tracked_fields=INTERPRETATION_TOP_LEVEL_FIELDS,
+                    schema_profile="interpretation_v1",
+                )
+            except GroqClientError as exc:
+                if exc.validation_issues:
+                    validation_issues = list(exc.validation_issues)
+                    problematic_fields = list(exc.problematic_fields)
+                if self._should_try_json_object_fallback(
+                    exc,
+                    response_format=response_format,
+                    attempted_response_formats=attempted_response_formats,
+                ):
+                    continue
+
+                raise self._attach_attempt_diagnostics(
+                    exc,
+                    attempted_response_formats,
+                    response_format=response_format,
+                    schema_profile="interpretation_v1",
+                ) from exc
+
+            return GroqInterpretationResponse(
+                result=result,
+                metadata=AIInterpretationMetadata(
+                    response_format=response_format,
+                    attempted_response_formats=attempted_response_formats,
+                    fallback_used=len(attempted_response_formats) > 1,
+                    problematic_fields=problematic_fields,
+                    validation_issue_count=len(validation_issues),
+                    validation_issues=validation_issues,
+                ),
+            )
+
+        raise GroqClientError(
+            code=AIComparisonErrorCode.unexpected_error,
+            message="AI interpretation failed before a final response format could be selected.",
+            retriable=False,
+            attempted_response_formats=tuple(attempted_response_formats),
+            fallback_used=len(attempted_response_formats) > 1,
+        )
+
+    async def extract_stress_from_image(
+        self,
+        *,
+        image_bytes: bytes,
+        content_type: str,
+        filename: str | None = None,
+    ) -> StressImageReadResponse:
+        if not self.is_configured:
+            raise GroqClientError(
+                code=AIComparisonErrorCode.not_configured,
+                message="AI vision is not configured on the backend.",
+                retriable=False,
+            )
+
+        encoded_image = base64.b64encode(image_bytes).decode("ascii")
+        image_url = f"data:{content_type};base64,{encoded_image}"
+        attempted_response_formats: list[str] = []
+
+        for response_format in self._resolve_response_formats():
+            attempted_response_formats.append(response_format)
+            payload = self._build_generic_chat_payload(
+                model_name=self._settings.GROQ_VISION_MODEL,
+                response_format=response_format,
+                schema_name="stress_from_image",
+                schema=GROQ_VISION_JSON_SCHEMA,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": build_vision_system_prompt(response_format),
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": build_vision_user_text(filename),
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": image_url},
+                            },
+                        ],
+                    },
+                ],
+            )
+
+            try:
+                response_payload = await self._post_chat_completion(
+                    payload,
+                    response_format=response_format,
+                    schema_profile="vision_v1",
+                )
+                result, _ = self._validate_typed_response_payload(
+                    response_payload,
+                    response_model=StressImageReadResponse,
+                    tracked_fields=VISION_TRACKED_TOP_LEVEL_FIELDS,
+                    schema_profile="vision_v1",
+                )
+                return result
+            except GroqClientError as exc:
+                if self._should_try_json_object_fallback(
+                    exc,
+                    response_format=response_format,
+                    attempted_response_formats=attempted_response_formats,
+                ):
+                    continue
+                raise self._attach_attempt_diagnostics(
+                    exc,
+                    attempted_response_formats,
+                    response_format=response_format,
+                    schema_profile="vision_v1",
+                ) from exc
+
+        raise GroqClientError(
+            code=AIComparisonErrorCode.unexpected_error,
+            message="AI vision failed before a final response format could be selected.",
+            retriable=False,
+            attempted_response_formats=tuple(attempted_response_formats),
+            fallback_used=len(attempted_response_formats) > 1,
+        )
 
     async def compare_fatigue_analysis(self, comparison_input: dict) -> GroqComparisonResponse:
         if not self.is_configured:
@@ -211,6 +401,34 @@ class GroqClient:
             ),
         )
 
+    def _resolve_response_formats(self) -> tuple[GroqResponseFormat, ...]:
+        if self._settings.GROQ_RESPONSE_FORMAT == "json_schema":
+            return ("json_schema",)
+        if self._settings.GROQ_RESPONSE_FORMAT == "json_object":
+            return ("json_object",)
+        return ("json_schema", "json_object")
+
+    def _build_generic_chat_payload(
+        self,
+        *,
+        model_name: str,
+        response_format: GroqResponseFormat,
+        schema_name: str,
+        schema: dict,
+        messages: list[dict[str, Any]],
+    ) -> dict:
+        return {
+            "model": model_name,
+            "temperature": 0.1,
+            "response_format": self._build_generic_response_format_payload(
+                response_format,
+                schema_name=schema_name,
+                schema=schema,
+                model_name=model_name,
+            ),
+            "messages": messages,
+        }
+
     def _build_response_format_payload(
         self,
         response_format: GroqResponseFormat,
@@ -227,6 +445,27 @@ class GroqClient:
                 "name": "fatigue_ai_comparison",
                 "strict": strict_mode,
                 "schema": get_schema_for_profile(schema_profile),
+            },
+        }
+
+    def _build_generic_response_format_payload(
+        self,
+        response_format: GroqResponseFormat,
+        *,
+        schema_name: str,
+        schema: dict,
+        model_name: str,
+    ) -> dict:
+        if response_format == "json_object":
+            return {"type": "json_object"}
+
+        strict_mode = model_name in _STRICT_JSON_SCHEMA_MODELS
+        return {
+            "type": "json_schema",
+            "json_schema": {
+                "name": schema_name,
+                "strict": strict_mode,
+                "schema": schema,
             },
         }
 
@@ -310,6 +549,21 @@ class GroqClient:
         *,
         schema_profile: GroqSchemaProfile,
     ) -> tuple[AIComparisonResult, list[str]]:
+        return self._validate_typed_response_payload(
+            response_payload,
+            response_model=AIComparisonResult,
+            tracked_fields=get_tracked_top_level_fields(),
+            schema_profile=schema_profile,
+        )
+
+    def _validate_typed_response_payload(
+        self,
+        response_payload: dict,
+        *,
+        response_model: type[BaseModel],
+        tracked_fields: tuple[str, ...],
+        schema_profile: str,
+    ) -> tuple[Any, list[str]]:
         content = self._extract_message_content(response_payload)
         try:
             parsed_content = json.loads(content)
@@ -322,12 +576,15 @@ class GroqClient:
                 schema_simplified=is_simplified_schema_profile(schema_profile),
             ) from exc
 
-        omitted_or_null_fields = self._collect_omitted_or_null_fields(parsed_content)
+        omitted_or_null_fields = self._collect_omitted_or_null_fields(
+            parsed_content,
+            tracked_fields,
+        )
 
         try:
-            return AIComparisonResult.model_validate(parsed_content), omitted_or_null_fields
+            return response_model.model_validate(parsed_content), omitted_or_null_fields
         except ValidationError as exc:
-            validation_issues = self._build_validation_issues(exc)
+            validation_issues = self._build_validation_issues(response_model, exc)
             problematic_fields = self._extract_problematic_fields(validation_issues)
             logger.warning(
                 "Groq schema validation failed schema_profile=%s problematic_fields=%s issues=%s",
@@ -392,6 +649,7 @@ class GroqClient:
 
     def _build_validation_issues(
         self,
+        response_model: type[BaseModel],
         exc: ValidationError,
     ) -> list[AIComparisonValidationIssue]:
         validation_issues: list[AIComparisonValidationIssue] = []
@@ -401,7 +659,10 @@ class GroqClient:
             validation_issues.append(
                 AIComparisonValidationIssue(
                     field_path=self._format_field_path(loc),
-                    expected_type=self._lookup_expected_type(loc),
+                    expected_type=self._lookup_expected_type_for_model(
+                        response_model,
+                        loc,
+                    ),
                     actual_type=(
                         None
                         if error_type == "missing"
@@ -443,10 +704,17 @@ class GroqClient:
         return ".".join(parts) if parts else "<root>"
 
     def _lookup_expected_type(self, loc: tuple[Any, ...] | Any) -> str | None:
+        return self._lookup_expected_type_for_model(AIComparisonResult, loc)
+
+    def _lookup_expected_type_for_model(
+        self,
+        response_model: type[BaseModel],
+        loc: tuple[Any, ...] | Any,
+    ) -> str | None:
         if not isinstance(loc, tuple):
             return None
 
-        schema = AIComparisonResult.model_json_schema()
+        schema = response_model.model_json_schema()
         defs = schema.get("$defs", {})
         node = self._resolve_schema_node(schema, defs, loc)
         return self._describe_schema_type(node, defs)
@@ -590,6 +858,19 @@ class GroqClient:
             "too_short",
         }
 
+    def _should_try_json_object_fallback(
+        self,
+        exc: GroqClientError,
+        *,
+        response_format: GroqResponseFormat,
+        attempted_response_formats: list[str],
+    ) -> bool:
+        return (
+            exc.should_fallback
+            and response_format == "json_schema"
+            and "json_object" not in attempted_response_formats
+        )
+
     def _should_try_fallback(
         self,
         exc: GroqClientError,
@@ -633,12 +914,16 @@ class GroqClient:
 
         return "failed to validate json" in error_message.lower()
 
-    def _collect_omitted_or_null_fields(self, parsed_content: object) -> list[str]:
+    def _collect_omitted_or_null_fields(
+        self,
+        parsed_content: object,
+        tracked_fields: tuple[str, ...],
+    ) -> list[str]:
         if not isinstance(parsed_content, dict):
-            return list(get_tracked_top_level_fields())
+            return list(tracked_fields)
 
         omitted_or_null_fields: list[str] = []
-        for field_name in get_tracked_top_level_fields():
+        for field_name in tracked_fields:
             if field_name not in parsed_content or parsed_content[field_name] is None:
                 omitted_or_null_fields.append(field_name)
 

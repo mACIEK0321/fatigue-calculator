@@ -27,6 +27,7 @@ def build_settings(*, response_format: str = "auto", model: str = "openai/gpt-os
         GROQ_API_KEY="test-key",
         GROQ_BASE_URL="https://api.groq.com/openai/v1",
         GROQ_MODEL=model,
+        GROQ_VISION_MODEL=model,
         GROQ_RESPONSE_FORMAT=response_format,
         GROQ_TIMEOUT_SECONDS=5.0,
     )

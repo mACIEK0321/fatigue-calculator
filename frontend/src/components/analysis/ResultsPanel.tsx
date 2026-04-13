@@ -4,8 +4,7 @@ import React from "react";
 import { ShieldAlert, ShieldCheck } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type {
-  AIComparisonEnvelope,
-  AIComparisonLife,
+  AIInterpretationEnvelope,
   FatigueAnalysisResponse,
   FatigueLifeResult,
   MeanStressCorrectionResult,
@@ -13,9 +12,9 @@ import type {
 
 interface ResultsPanelProps {
   results: FatigueAnalysisResponse | null;
-  aiComparison: AIComparisonEnvelope | null;
+  aiInterpretation: AIInterpretationEnvelope | null;
   isLoading: boolean;
-  showAIComparison: boolean;
+  showAIInterpretation: boolean;
 }
 
 function formatCycles(value: number): string {
@@ -27,12 +26,6 @@ function formatCycles(value: number): string {
 }
 
 function formatLife(life: FatigueLifeResult): string {
-  if (life.status === "infinite") return "Infinite life";
-  if (!life.cycles || life.cycles <= 0) return "Immediate failure";
-  return `${formatCycles(life.cycles)} cycles`;
-}
-
-function formatAIComparisonLife(life: AIComparisonLife): string {
   if (life.status === "infinite") return "Infinite life";
   if (!life.cycles || life.cycles <= 0) return "Immediate failure";
   return `${formatCycles(life.cycles)} cycles`;
@@ -64,12 +57,12 @@ function getStatusLabel(
 
 export default function ResultsPanel({
   results,
-  aiComparison,
+  aiInterpretation,
   isLoading,
-  showAIComparison,
+  showAIInterpretation,
 }: ResultsPanelProps) {
-  const aiResult = aiComparison?.status === "success" ? aiComparison.result : null;
-  const aiAssumptions = aiResult?.assumptions ?? [];
+  const aiResult =
+    aiInterpretation?.status === "success" ? aiInterpretation.result : null;
   const aiWarnings = aiResult?.warnings ?? [];
 
   if (!results) {
@@ -85,11 +78,11 @@ export default function ResultsPanel({
             <div className="flex h-32 items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50 text-sm text-slate-500">
               Run an analysis to see results.
             </div>
-            {showAIComparison ? (
+            {showAIInterpretation ? (
               <div className="rounded-xl border border-dashed border-[#99f6e4] bg-[#f0fdfa] px-4 py-3 text-sm text-[#115e59]">
                 {isLoading
-                  ? "AI comparison requested. The backend is preparing the native result and the optional AI JSON response."
-                  : "AI comparison is enabled. A comparison card will appear here after the next run."}
+                  ? "AI interpretation requested. The backend is preparing the native result and the optional text summary."
+                  : "AI interpretation is enabled. A summary card will appear here after the next run."}
               </div>
             ) : null}
           </div>
@@ -303,90 +296,38 @@ export default function ResultsPanel({
         </CardContent>
       </Card>
 
-      {showAIComparison ? (
+      {showAIInterpretation ? (
         <Card className="border-slate-200 bg-white shadow-sm">
           <CardHeader className="pb-3">
             <CardTitle className="text-base text-slate-900">
-              AI comparison
+              AI interpretation
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {aiComparison?.status === "success" && aiResult ? (
+            {aiInterpretation?.status === "success" && aiResult ? (
               <>
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                    <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-slate-500">
-                      Life comparison
-                    </p>
-                    <p className="mt-2 text-sm text-slate-600">
-                      Native: {formatLife(results.selected_life)}
-                    </p>
-                    <p className="mt-1 text-sm text-slate-900">
-                      AI: {formatAIComparisonLife(aiResult.life)}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                    <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-slate-500">
-                      Safety factor comparison
-                    </p>
-                    <p className="mt-2 text-sm text-slate-600">
-                      Native: {results.selected_mean_stress_result.safety_factor.toFixed(3)}
-                    </p>
-                    <p className="mt-1 text-sm text-slate-900">
-                      AI:{" "}
-                      {aiResult.safety_factor === null ||
-                      aiResult.safety_factor === undefined
-                        ? "N/A"
-                        : aiResult.safety_factor.toFixed(3)}
-                    </p>
-                  </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-slate-500">
+                    Summary
+                  </p>
+                  <p className="mt-2 text-sm text-slate-900">{aiResult.summary}</p>
+                  <p className="mt-2 text-xs text-slate-500">
+                    Model: {aiResult.raw_model_name}
+                  </p>
                 </div>
 
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
                     <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-slate-500">
-                      Basquin parameters
-                    </p>
-                    <p className="mt-2 text-sm text-slate-600">
-                      Native: sigma_f&apos; ={" "}
-                      {results.sn_curve_source.basquin_parameters.sigma_f_prime.toFixed(1)} MPa, b ={" "}
-                      {results.sn_curve_source.basquin_parameters.b.toFixed(4)}
-                    </p>
-                    <p className="mt-1 text-sm text-slate-900">
-                      AI:{" "}
-                      {aiResult.basquin_parameters.sigma_f_prime !== null &&
-                      aiResult.basquin_parameters.sigma_f_prime !== undefined &&
-                      aiResult.basquin_parameters.b !== null &&
-                      aiResult.basquin_parameters.b !== undefined
-                        ? `sigma_f' = ${aiResult.basquin_parameters.sigma_f_prime.toFixed(1)} MPa, b = ${aiResult.basquin_parameters.b.toFixed(4)}`
-                        : "N/A"}
-                    </p>
-                    <p className="mt-1 text-xs text-slate-500">
-                      Model: {aiResult.raw_model_name}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                    <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-slate-500">
-                      AI summary
-                    </p>
-                    <p className="mt-2 text-sm text-slate-900">
-                      {aiResult.summary}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                    <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-slate-500">
-                      Assumptions
+                      Key findings
                     </p>
                     <div className="mt-2 space-y-1 text-sm text-slate-700">
-                      {aiAssumptions.length > 0 ? (
-                        aiAssumptions.map((assumption, index) => (
-                          <p key={`${assumption}-${index}`}>{assumption}</p>
+                      {aiResult.key_findings.length > 0 ? (
+                        aiResult.key_findings.map((finding, index) => (
+                          <p key={`${finding}-${index}`}>{finding}</p>
                         ))
                       ) : (
-                        <p>No explicit assumptions returned.</p>
+                        <p>No additional findings returned.</p>
                       )}
                     </div>
                   </div>
@@ -405,17 +346,32 @@ export default function ResultsPanel({
                     </div>
                   </div>
                 </div>
+
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-slate-500">
+                    Engineering notes
+                  </p>
+                  <div className="mt-2 space-y-1 text-sm text-slate-700">
+                    {aiResult.engineering_notes.length > 0 ? (
+                      aiResult.engineering_notes.map((note, index) => (
+                        <p key={`${note}-${index}`}>{note}</p>
+                      ))
+                    ) : (
+                      <p>No engineering notes returned.</p>
+                    )}
+                  </div>
+                </div>
               </>
-            ) : aiComparison?.status === "error" && aiComparison.error ? (
+            ) : aiInterpretation?.status === "error" && aiInterpretation.error ? (
               <div className="rounded-xl border border-[#fed7aa] bg-[#fff7ed] px-4 py-3 text-sm text-[#9a3412]">
-                <p className="font-semibold">AI comparison unavailable</p>
-                <p className="mt-1">{aiComparison.error.message}</p>
+                <p className="font-semibold">AI interpretation unavailable</p>
+                <p className="mt-1">{aiInterpretation.error.message}</p>
               </div>
             ) : (
               <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
                 {isLoading
-                  ? "Waiting for the optional AI comparison."
-                  : "AI comparison was skipped for this run."}
+                  ? "Waiting for the optional AI interpretation."
+                  : "AI interpretation was skipped for this run."}
               </div>
             )}
           </CardContent>

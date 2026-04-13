@@ -2,7 +2,10 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import ResultsPanel from "@/components/analysis/ResultsPanel";
-import type { AIComparisonEnvelope, FatigueAnalysisResponse } from "@/types/fatigue";
+import type {
+  AIInterpretationEnvelope,
+  FatigueAnalysisResponse,
+} from "@/types/fatigue";
 
 describe("ResultsPanel", () => {
   it("renders the current infinite-life semantic from selected_life", () => {
@@ -109,9 +112,9 @@ describe("ResultsPanel", () => {
     const markup = renderToStaticMarkup(
       <ResultsPanel
         results={results}
-        aiComparison={null}
+        aiInterpretation={null}
         isLoading={false}
-        showAIComparison={false}
+        showAIInterpretation={false}
       />
     );
 
@@ -230,60 +233,17 @@ describe("ResultsPanel", () => {
       miner_damage: null,
     };
 
-    const aiComparison: AIComparisonEnvelope = {
+    const aiInterpretation: AIInterpretationEnvelope = {
       provider: "groq",
       enabled: true,
       status: "success",
       result: {
         summary: "Groq summary",
-        assumptions: ["Assume nominal room temperature."],
-        interpreted_inputs: {
-          material_label: null,
-          sn_curve_source: "points_fit",
-          surface_factor: 0.9,
-          marin_factors: {
-            size_factor: 1,
-            load_factor: 1,
-            temperature_factor: 1,
-            reliability_factor: 1,
-          },
-          notch_correction_factor: null,
-          loading_blocks_count: 0,
-        },
-        basquin_parameters: {
-          sigma_f_prime: 1340,
-          b: -0.118,
-          source: "points_fit",
-        },
-        modified_endurance_limit: 242,
-        stress_state: {
-          max_stress: 280,
-          min_stress: -40,
-          mean_stress: 120,
-          stress_amplitude: 160,
-          stress_ratio: -0.1428571429,
-        },
-        mean_stress_result: {
-          model_name: "goodman",
-          effective_mean_stress: 120,
-          equivalent_alternating_stress: 266,
-          is_safe: false,
-        },
-        life: {
-          status: "finite",
-          cycles: 700000,
-          reason: "finite",
-        },
-        safety_factor: 0.91,
-        sn_curve_points: [
-          { x: 1e4, y: 430 },
-          { x: 1e6, y: 250 },
+        key_findings: [
+          "Goodman remains the controlling model for this points-fit case.",
         ],
-        goodman_or_haigh_points: [
-          { x: 0, y: 242 },
-          { x: 572, y: 0 },
-        ],
-        warnings: ["Comparison warning"],
+        warnings: ["Input screenshot should be cross-checked against solver units."],
+        engineering_notes: ["Points-fit data quality looks consistent."],
         raw_model_name: "openai/gpt-oss-20b",
       },
       error: null,
@@ -292,9 +252,9 @@ describe("ResultsPanel", () => {
     const markup = renderToStaticMarkup(
       <ResultsPanel
         results={results}
-        aiComparison={aiComparison}
+        aiInterpretation={aiInterpretation}
         isLoading={false}
-        showAIComparison={true}
+        showAIInterpretation={true}
       />
     );
 
@@ -302,9 +262,9 @@ describe("ResultsPanel", () => {
     expect(markup).toContain(
       "Final chart and life result use the backend response, not the local form preview."
     );
-    expect(markup).toContain("AI comparison");
-    expect(markup).toContain("AI: 700.0k cycles");
-    expect(markup).toContain("Comparison warning");
+    expect(markup).toContain("AI interpretation");
+    expect(markup).toContain("Goodman remains the controlling model");
+    expect(markup).toContain("cross-checked against solver units");
   });
 
   it("shows a graceful AI error without hiding native results", () => {
@@ -398,14 +358,14 @@ describe("ResultsPanel", () => {
       notch_result: null,
       miner_damage: null,
     };
-    const aiComparison: AIComparisonEnvelope = {
+    const aiInterpretation: AIInterpretationEnvelope = {
       provider: "groq",
       enabled: true,
       status: "error",
       result: null,
       error: {
         code: "timeout",
-        message: "AI comparison timed out before a valid response arrived.",
+        message: "AI interpretation timed out before a valid response arrived.",
         retriable: true,
       },
     };
@@ -413,14 +373,14 @@ describe("ResultsPanel", () => {
     const markup = renderToStaticMarkup(
       <ResultsPanel
         results={results}
-        aiComparison={aiComparison}
+        aiInterpretation={aiInterpretation}
         isLoading={false}
-        showAIComparison={true}
+        showAIInterpretation={true}
       />
     );
 
     expect(markup).toContain("Infinite life");
-    expect(markup).toContain("AI comparison unavailable");
+    expect(markup).toContain("AI interpretation unavailable");
     expect(markup).toContain("timed out");
   });
 
@@ -428,16 +388,16 @@ describe("ResultsPanel", () => {
     const markup = renderToStaticMarkup(
       <ResultsPanel
         results={null}
-        aiComparison={null}
+        aiInterpretation={null}
         isLoading={true}
-        showAIComparison={true}
+        showAIInterpretation={true}
       />
     );
 
-    expect(markup).toContain("AI comparison requested.");
+    expect(markup).toContain("AI interpretation requested.");
   });
 
-  it("renders a simplified AI comparison payload without optional sections", () => {
+  it("renders a simplified AI interpretation payload", () => {
     const results: FatigueAnalysisResponse = {
       stress_state: {
         input_max_stress: 220,
@@ -512,48 +472,22 @@ describe("ResultsPanel", () => {
       notch_result: null,
       miner_damage: null,
     };
-    const aiComparison: AIComparisonEnvelope = {
+    const aiInterpretation: AIInterpretationEnvelope = {
       provider: "groq",
       enabled: true,
       status: "success",
       result: {
         summary: "Minimal AI summary",
-        basquin_parameters: {
-          sigma_f_prime: 990,
-          b: -0.096,
-          source: "material_defaults",
-        },
-        modified_endurance_limit: 231,
-        stress_state: {
-          max_stress: 220,
-          min_stress: -60,
-          mean_stress: 80,
-          stress_amplitude: 140,
-          stress_ratio: -0.2727272727,
-        },
-        life: {
-          status: "finite",
-          cycles: 880000,
-          reason: "finite",
-        },
-        safety_factor: 1.01,
+        key_findings: [],
         warnings: [],
+        engineering_notes: [],
         raw_model_name: "openai/gpt-oss-20b",
       },
       error: null,
       metadata: {
         response_format: "json_schema",
-        schema_profile: "minimal_v1",
-        schema_simplified: true,
         attempted_response_formats: ["json_schema"],
         fallback_used: false,
-        omitted_or_null_fields: [
-          "assumptions",
-          "interpreted_inputs",
-          "mean_stress_result",
-          "sn_curve_points",
-          "goodman_or_haigh_points",
-        ],
         problematic_fields: [],
         validation_issue_count: 0,
         validation_issues: [],
@@ -563,15 +497,15 @@ describe("ResultsPanel", () => {
     const markup = renderToStaticMarkup(
       <ResultsPanel
         results={results}
-        aiComparison={aiComparison}
+        aiInterpretation={aiInterpretation}
         isLoading={false}
-        showAIComparison={true}
+        showAIInterpretation={true}
       />
     );
 
     expect(markup).toContain("Minimal AI summary");
-    expect(markup).toContain("AI: 880.0k cycles");
-    expect(markup).toContain("No explicit assumptions returned.");
+    expect(markup).toContain("No additional findings returned.");
     expect(markup).toContain("No AI warnings returned.");
+    expect(markup).toContain("No engineering notes returned.");
   });
 });

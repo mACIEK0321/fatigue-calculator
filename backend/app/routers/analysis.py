@@ -2,7 +2,7 @@
 
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from app.core.config import settings
 from app.core.fatigue_engine import (
@@ -12,16 +12,22 @@ from app.core.fatigue_engine import (
 from app.models.schemas import (
     AIComparisonErrorCode,
     AIComparisonMetadata,
+    AIInterpretationErrorCode,
+    AIInterpretationMetadata,
     FatigueAnalysisCompareRequest,
     FatigueAnalysisCompareResponse,
+    FatigueAnalysisInterpretRequest,
+    FatigueAnalysisInterpretResponse,
     FatigueAnalysisRequest,
     FatigueAnalysisResponse,
+    StressImageReadResponse,
     SurfaceFinishInput,
 )
 from app.services.groq_client import GroqClient, GroqClientError
 
 router = APIRouter(prefix="/api", tags=["analysis"])
 logger = logging.getLogger(__name__)
+MAX_IMAGE_UPLOAD_BYTES = 10 * 1024 * 1024
 
 # ---------------------------------------------------------------------------
 # Material presets
@@ -201,6 +207,81 @@ def _build_ai_status(
     }
 
 
+def _build_ai_interpretation_payload(
+    request: FatigueAnalysisInterpretRequest,
+    native_analysis: dict,
+    ka: float,
+) -> dict:
+    return {
+        "material": request.material.model_dump(),
+        "user_inputs": {
+            "max_stress": request.max_stress,
+            "min_stress": request.min_stress,
+            "selected_mean_stress_model": request.selected_mean_stress_model.value,
+            "sn_curve_source_mode": request.sn_curve_source.mode.value,
+        },
+        "surface_factor": {
+            "mode": request.surface_factor_selection.mode.value,
+            "finish_type": (
+                request.surface_factor_selection.finish_type.value
+                if request.surface_factor_selection.finish_type is not None
+                else None
+            ),
+            "effective_ka": ka,
+        },
+        "marin_factors": request.marin_factors.model_dump(),
+        "loading_blocks": (
+            [block.model_dump() for block in request.loading_blocks]
+            if request.loading_blocks
+            else []
+        ),
+        "native_analysis": {
+            "stress_state": native_analysis["stress_state"],
+            "modified_endurance_limit": native_analysis["modified_endurance_limit"],
+            "sn_curve_source": native_analysis["sn_curve_source"],
+            "selected_mean_stress_result": native_analysis["selected_mean_stress_result"],
+            "selected_life": native_analysis["selected_life"],
+            "notch_result": native_analysis.get("notch_result"),
+            "miner_damage": native_analysis.get("miner_damage"),
+        },
+        "vision_context": (
+            request.vision_context.model_dump() if request.vision_context else None
+        ),
+    }
+
+
+def _build_ai_interpretation_status(
+    *,
+    enabled: bool,
+    status: str,
+    result: dict | None = None,
+    metadata: dict | None = None,
+    error_code: AIInterpretationErrorCode | None = None,
+    error_message: str | None = None,
+    retriable: bool = False,
+) -> dict:
+    return {
+        "provider": "groq",
+        "enabled": enabled,
+        "status": status,
+        "result": result,
+        "metadata": metadata,
+        "error": (
+            {
+                "code": error_code,
+                "message": error_message,
+                "retriable": retriable,
+            }
+            if error_code is not None and error_message is not None
+            else None
+        ),
+    }
+
+
+def _map_interpretation_error_code(code: AIComparisonErrorCode) -> AIInterpretationErrorCode:
+    return AIInterpretationErrorCode(code.value)
+
+
 async def _run_ai_comparison(
     request: FatigueAnalysisCompareRequest,
     native_analysis: dict,
@@ -257,6 +338,60 @@ async def _run_ai_comparison(
     )
 
 
+async def _run_ai_interpretation(
+    request: FatigueAnalysisInterpretRequest,
+    native_analysis: dict,
+    ka: float,
+) -> dict:
+    if not request.ai_interpretation.enabled:
+        return _build_ai_interpretation_status(
+            enabled=False,
+            status="skipped",
+            metadata=AIInterpretationMetadata().model_dump(),
+            error_code=AIInterpretationErrorCode.disabled,
+            error_message="AI interpretation was not requested for this analysis.",
+        )
+
+    payload = _build_ai_interpretation_payload(request, native_analysis, ka)
+    client = get_groq_client()
+
+    try:
+        result = await client.interpret_fatigue_analysis(payload)
+    except GroqClientError as exc:
+        logger.warning("AI interpretation failed code=%s", exc.code.value)
+        return _build_ai_interpretation_status(
+            enabled=True,
+            status="error",
+            metadata=AIInterpretationMetadata(
+                response_format=exc.response_format,
+                attempted_response_formats=list(exc.attempted_response_formats),
+                fallback_used=exc.fallback_used,
+                problematic_fields=list(exc.problematic_fields),
+                validation_issue_count=len(exc.validation_issues),
+                validation_issues=list(exc.validation_issues),
+            ).model_dump(),
+            error_code=_map_interpretation_error_code(exc.code),
+            error_message=exc.message,
+            retriable=exc.retriable,
+        )
+    except Exception:
+        logger.exception("Unexpected AI interpretation failure")
+        return _build_ai_interpretation_status(
+            enabled=True,
+            status="error",
+            error_code=AIInterpretationErrorCode.unexpected_error,
+            error_message="AI interpretation failed due to an unexpected internal error.",
+            retriable=False,
+        )
+
+    return _build_ai_interpretation_status(
+        enabled=True,
+        status="success",
+        result=result.result.model_dump(),
+        metadata=result.metadata.model_dump(),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -298,6 +433,75 @@ async def analyze_fatigue_with_comparison(
         "native_analysis": native_analysis,
         "ai_comparison": ai_comparison,
     }
+
+
+@router.post("/analyze/interpret", response_model=FatigueAnalysisInterpretResponse)
+async def analyze_fatigue_with_interpretation(
+    request: FatigueAnalysisInterpretRequest,
+) -> dict:
+    """Perform native analysis and optionally add a lightweight AI interpretation."""
+    try:
+        native_analysis, ka = _run_native_analysis(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Unexpected fatigue interpretation failure")
+        raise HTTPException(
+            status_code=500,
+            detail="Fatigue analysis failed due to an internal server error.",
+        ) from exc
+
+    ai_interpretation = await _run_ai_interpretation(request, native_analysis, ka)
+    return {
+        "native_analysis": native_analysis,
+        "ai_interpretation": ai_interpretation,
+    }
+
+
+@router.post("/vision/stress-from-image", response_model=StressImageReadResponse)
+async def read_stress_from_image(file: UploadFile = File(...)) -> StressImageReadResponse:
+    """Read a suggested maximum stress value from a single uploaded screenshot."""
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Only image uploads are supported.")
+
+    image_bytes = await file.read()
+    if not image_bytes:
+        raise HTTPException(status_code=400, detail="Uploaded image is empty.")
+    if len(image_bytes) > MAX_IMAGE_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail="Uploaded image is too large for this endpoint.",
+        )
+
+    client = get_groq_client()
+    try:
+        return await client.extract_stress_from_image(
+            image_bytes=image_bytes,
+            content_type=file.content_type,
+            filename=file.filename,
+        )
+    except GroqClientError as exc:
+        logger.warning("Vision extraction failed code=%s", exc.code.value)
+        if exc.code == AIComparisonErrorCode.not_configured:
+            raise HTTPException(
+                status_code=503,
+                detail="Image reading AI is not configured on the backend.",
+            ) from exc
+        if exc.code == AIComparisonErrorCode.timeout:
+            raise HTTPException(
+                status_code=504,
+                detail="Image reading timed out before a reliable result arrived.",
+            ) from exc
+        raise HTTPException(
+            status_code=502,
+            detail="Image reading failed due to an upstream AI service error.",
+        ) from exc
+    except Exception as exc:
+        logger.exception("Unexpected vision extraction failure")
+        raise HTTPException(
+            status_code=500,
+            detail="Image reading failed due to an internal server error.",
+        ) from exc
 
 
 @router.post("/surface-factor")

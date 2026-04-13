@@ -14,16 +14,11 @@ import {
   YAxis,
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type {
-  AIComparisonEnvelope,
-  SNCurveSourceResult,
-  SNChartData,
-} from "@/types/fatigue";
+import type { SNCurveSourceResult, SNChartData } from "@/types/fatigue";
 
 interface SNChartProps {
   chartData: SNChartData | null;
   curveSource: SNCurveSourceResult | null;
-  aiComparison: AIComparisonEnvelope | null;
 }
 
 function formatLogTick(value: number): string {
@@ -32,11 +27,7 @@ function formatLogTick(value: number): string {
   return `10^${exponent}`;
 }
 
-export default function SNChart({
-  chartData,
-  curveSource,
-  aiComparison,
-}: SNChartProps) {
+export default function SNChart({ chartData, curveSource }: SNChartProps) {
   if (!chartData || chartData.curve.length === 0) {
     return (
       <Card>
@@ -66,14 +57,6 @@ export default function SNChart({
         },
       ]
     : [];
-  const aiCurve =
-    aiComparison?.status === "success" && aiComparison.result
-      ? (aiComparison.result.sn_curve_points ?? []).map((point) => ({
-          cycles: point.x,
-          stress: point.y,
-        }))
-      : [];
-
   return (
     <Card>
       <CardHeader>
@@ -198,18 +181,6 @@ export default function SNChart({
                 dot={false}
                 name="Active S-N curve"
               />
-              {aiCurve.length > 0 ? (
-                <Line
-                  type="monotone"
-                  data={aiCurve}
-                  dataKey="stress"
-                  stroke="#0f766e"
-                  strokeWidth={2}
-                  strokeDasharray="6 4"
-                  dot={false}
-                  name="AI S-N curve"
-                />
-              ) : null}
               {selectedPoint.length > 0 ? (
                 <Scatter
                   data={selectedPoint}

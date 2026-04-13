@@ -1,6 +1,8 @@
 import type {
   AIComparisonOptions,
+  AIInterpretationOptions,
   FatigueAnalysisCompareRequest,
+  FatigueAnalysisInterpretRequest,
   FatigueAnalysisRequest,
   LoadingBlock,
   MarinFactors,
@@ -9,6 +11,7 @@ import type {
   NotchSensitivityInput,
   SNCurveSourceMode,
   SNFitPoint,
+  StressImageReadResponse,
   SurfaceFactorMode,
   SurfaceFinishType,
 } from "@/types/fatigue";
@@ -93,5 +96,17 @@ export function buildFatigueComparisonRequest(
   return {
     ...buildFatigueAnalysisRequest(values),
     ai_comparison: aiComparison,
+  };
+}
+
+export function buildFatigueInterpretationRequest(
+  values: FatigueFormValues,
+  aiInterpretation: AIInterpretationOptions,
+  visionContext?: StressImageReadResponse
+): FatigueAnalysisInterpretRequest {
+  return {
+    ...buildFatigueAnalysisRequest(values),
+    ai_interpretation: aiInterpretation,
+    vision_context: visionContext,
   };
 }

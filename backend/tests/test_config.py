@@ -14,6 +14,7 @@ def test_settings_default_to_local_development(monkeypatch) -> None:
     assert settings.ALLOWED_ORIGINS == ["http://localhost:3000"]
     assert settings.GROQ_BASE_URL == "https://api.groq.com/openai/v1"
     assert settings.GROQ_MODEL == "openai/gpt-oss-20b"
+    assert settings.GROQ_VISION_MODEL == "openai/gpt-oss-20b"
     assert settings.GROQ_RESPONSE_FORMAT == "auto"
     assert settings.GROQ_TIMEOUT_SECONDS == 20.0
 

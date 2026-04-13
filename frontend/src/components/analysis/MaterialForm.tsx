@@ -14,15 +14,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { getMaterialPresets } from "@/lib/api";
+import { ApiError, getMaterialPresets, readStressFromImage } from "@/lib/api";
 import {
-  buildFatigueComparisonRequest,
+  buildFatigueInterpretationRequest,
   type FatigueFormValues,
   sanitizePoints,
 } from "@/lib/analysis-request";
 import { parseNumericDraft, toNumericDraft } from "@/lib/analysis-form";
+import { getStressPrefillDecision } from "@/lib/stress-image";
 import type {
-  FatigueAnalysisCompareRequest,
+  FatigueAnalysisInterpretRequest,
+  ConfidenceLevel,
   LoadingBlock,
   MarinFactors,
   MaterialPreset,
@@ -31,19 +33,20 @@ import type {
   NotchSensitivityInput,
   SNCurveSourceMode,
   SNFitPoint,
+  StressImageReadResponse,
   SurfaceFactorMode,
   SurfaceFinishType,
 } from "@/types/fatigue";
 
 interface MaterialFormProps {
-  onSubmit: (request: FatigueAnalysisCompareRequest) => void;
+  onSubmit: (request: FatigueAnalysisInterpretRequest) => void;
   isLoading: boolean;
   snCurveSourceMode: SNCurveSourceMode;
   onSNCurveSourceModeChange: (mode: SNCurveSourceMode) => void;
   snPoints: SNFitPoint[];
   onSNPointsChange: (points: SNFitPoint[]) => void;
-  compareWithAI: boolean;
-  onCompareWithAIChange: (enabled: boolean) => void;
+  includeAIInterpretation: boolean;
+  onIncludeAIInterpretationChange: (enabled: boolean) => void;
 }
 
 const defaultMaterial: MaterialProperties = {
@@ -124,6 +127,26 @@ function getLoadingBlockDraft(block: LoadingBlock): LoadingBlockDraft {
     cycles: toNumericDraft(block.cycles),
     repeats: toNumericDraft(block.repeats),
   };
+}
+
+function formatDetectedValue(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "N/A";
+  }
+  if (Math.abs(value) >= 1000) {
+    return value.toFixed(1);
+  }
+  return value.toFixed(3);
+}
+
+function confidenceTone(confidence: ConfidenceLevel): string {
+  if (confidence === "high") {
+    return "bg-[#dcfce7] text-[#166534]";
+  }
+  if (confidence === "medium") {
+    return "bg-[#fef3c7] text-[#92400e]";
+  }
+  return "bg-[#fee2e2] text-[#991b1b]";
 }
 
 function Section({
@@ -249,8 +272,8 @@ export default function MaterialForm({
   onSNCurveSourceModeChange,
   snPoints,
   onSNPointsChange,
-  compareWithAI,
-  onCompareWithAIChange,
+  includeAIInterpretation,
+  onIncludeAIInterpretationChange,
 }: MaterialFormProps) {
   const [presets, setPresets] = useState<MaterialPreset[]>([]);
   const [material, setMaterial] = useState<MaterialProperties>(defaultMaterial);
@@ -279,6 +302,12 @@ export default function MaterialForm({
   const [loadingBlocks, setLoadingBlocks] = useState<LoadingBlockDraft[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const [imageReadResult, setImageReadResult] =
+    useState<StressImageReadResponse | null>(null);
+  const [imageReadError, setImageReadError] = useState<string | null>(null);
+  const [isReadingImage, setIsReadingImage] = useState(false);
 
   useEffect(() => {
     getMaterialPresets()
@@ -288,7 +317,19 @@ export default function MaterialForm({
       });
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (imagePreviewUrl) {
+        URL.revokeObjectURL(imagePreviewUrl);
+      }
+    };
+  }, [imagePreviewUrl]);
+
   const validSNPoints = useMemo(() => sanitizePoints(snPoints), [snPoints]);
+  const imagePrefillDecision = useMemo(
+    () => getStressPrefillDecision(imageReadResult),
+    [imageReadResult]
+  );
 
   const handlePresetChange = (presetName: string) => {
     const preset = presets.find((item) => item.name === presetName);
@@ -370,6 +411,68 @@ export default function MaterialForm({
     setLoadingBlocks((current) =>
       current.filter((_, blockIndex) => blockIndex !== index)
     );
+  };
+
+  const handleImageSelection = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null;
+    setImageFile(file);
+    setImageReadResult(null);
+    setImageReadError(null);
+
+    if (imagePreviewUrl) {
+      URL.revokeObjectURL(imagePreviewUrl);
+    }
+
+    setImagePreviewUrl(file ? URL.createObjectURL(file) : null);
+  };
+
+  const handleReadStressFromImage = async () => {
+    if (!imageFile) {
+      setImageReadError("Select a screenshot before requesting image reading.");
+      return;
+    }
+
+    setIsReadingImage(true);
+    setImageReadError(null);
+    setImageReadResult(null);
+
+    try {
+      const result = await readStressFromImage(imageFile);
+      setImageReadResult(result);
+    } catch (error) {
+      if (error instanceof ApiError) {
+        setImageReadError(error.detail);
+      } else if (error instanceof Error) {
+        setImageReadError(error.message);
+      } else {
+        setImageReadError("Image reading failed.");
+      }
+    } finally {
+      setIsReadingImage(false);
+    }
+  };
+
+  const handleUseDetectedStress = () => {
+    const decision = imagePrefillDecision;
+    if (!decision.allowed || decision.valueMpa === undefined) {
+      setImageReadError(decision.message ?? "Detected value cannot be used safely.");
+      return;
+    }
+
+    if (
+      decision.requiresConfirmation &&
+      typeof window !== "undefined" &&
+      !window.confirm(
+        `Detected unit is ${imageReadResult?.detected_unit}. Insert ${decision.valueMpa.toFixed(
+          3
+        )} MPa as Maximum stress?`
+      )
+    ) {
+      return;
+    }
+
+    setMaxStressDraft(toNumericDraft(decision.valueMpa));
+    setImageReadError(null);
   };
 
   const parseFormValues = (): {
@@ -540,16 +643,14 @@ export default function MaterialForm({
       return;
     }
 
-    const request: FatigueAnalysisCompareRequest = buildFatigueComparisonRequest(
-      values,
-      {
-        enabled: compareWithAI,
-        include_interpreted_inputs: true,
-        include_sn_curve_points: true,
-        include_goodman_or_haigh_points: true,
-        max_points_per_series: 25,
-      }
-    );
+    const request: FatigueAnalysisInterpretRequest =
+      buildFatigueInterpretationRequest(
+        values,
+        {
+          enabled: includeAIInterpretation,
+        },
+        imageReadResult ?? undefined
+      );
 
     onSubmit(request);
   };
@@ -723,6 +824,157 @@ export default function MaterialForm({
                   <SelectItem value="morrow">Morrow</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+          </Section>
+
+          <Section
+            title="Stress screenshot"
+            description="Upload one FEA screenshot, read a suggested maximum stress, and review it before using it."
+          >
+            <div className="space-y-4 rounded-2xl border border-[#e2e8f0] bg-[#f8fafc] p-4">
+              <div className="flex flex-col gap-4 md:flex-row md:items-end">
+                <div className="flex-1 space-y-1.5">
+                  <Label htmlFor="stress-screenshot">Screenshot upload</Label>
+                  <Input
+                    id="stress-screenshot"
+                    type="file"
+                    accept="image/*"
+                    onChange={handleImageSelection}
+                  />
+                  <p className="text-sm text-[#475569]">
+                    Supported for single screenshots only. Native solver inputs still stay under user control.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={!imageFile || isReadingImage}
+                  onClick={handleReadStressFromImage}
+                >
+                  {isReadingImage ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Reading image
+                    </>
+                  ) : (
+                    "Read stress from image"
+                  )}
+                </Button>
+              </div>
+
+              {imagePreviewUrl ? (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#64748b]">
+                    Preview
+                  </p>
+                  <img
+                    src={imagePreviewUrl}
+                    alt="Uploaded stress screenshot preview"
+                    className="max-h-72 w-full rounded-2xl border border-[#cbd5e1] bg-white object-contain"
+                  />
+                </div>
+              ) : null}
+
+              {imageReadError ? (
+                <div className="rounded-2xl border border-[#fecaca] bg-[#fef2f2] px-4 py-3 text-sm text-[#991b1b]">
+                  {imageReadError}
+                </div>
+              ) : null}
+
+              {imageReadResult ? (
+                <div
+                  className={`space-y-4 rounded-2xl border px-4 py-4 ${
+                    imageReadResult.is_usable_for_prefill
+                      ? "border-[#99f6e4] bg-[#f0fdfa]"
+                      : "border-[#fde68a] bg-[#fffbeb]"
+                  }`}
+                >
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#475569]">
+                        Detected from image
+                      </p>
+                      <p className="mt-1 text-lg font-semibold text-[#0f172a]">
+                        Review before using
+                      </p>
+                    </div>
+                    <span
+                      className={`inline-flex w-fit rounded-full px-3 py-1 text-xs font-semibold uppercase ${confidenceTone(
+                        imageReadResult.confidence
+                      )}`}
+                    >
+                      {imageReadResult.confidence} confidence
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    <div className="rounded-xl border border-[#dbeafe] bg-white p-3">
+                      <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-[#64748b]">
+                        Quantity
+                      </p>
+                      <p className="mt-1 text-sm font-semibold text-[#0f172a]">
+                        {imageReadResult.detected_quantity}
+                      </p>
+                      <p className="mt-1 text-xs text-[#64748b]">
+                        {imageReadResult.detected_label ?? "No label detected"}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-[#dbeafe] bg-white p-3">
+                      <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-[#64748b]">
+                        Max value
+                      </p>
+                      <p className="mt-1 text-sm font-semibold text-[#0f172a]">
+                        {formatDetectedValue(imageReadResult.max_value)}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-[#dbeafe] bg-white p-3">
+                      <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-[#64748b]">
+                        Unit
+                      </p>
+                      <p className="mt-1 text-sm font-semibold text-[#0f172a]">
+                        {imageReadResult.detected_unit}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-[#dbeafe] bg-white p-3">
+                      <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-[#64748b]">
+                        Min value
+                      </p>
+                      <p className="mt-1 text-sm font-semibold text-[#0f172a]">
+                        {formatDetectedValue(imageReadResult.min_value)}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-[#e2e8f0] bg-white p-3">
+                    <p className="text-[12px] font-medium uppercase tracking-[0.14em] text-[#64748b]">
+                      Notes
+                    </p>
+                    <div className="mt-2 space-y-1 text-sm text-[#334155]">
+                      {imageReadResult.notes.length > 0 ? (
+                        imageReadResult.notes.map((note, index) => (
+                          <p key={`${note}-${index}`}>{note}</p>
+                        ))
+                      ) : (
+                        <p>No additional notes returned.</p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-sm text-[#475569]">
+                      {imagePrefillDecision.message}
+                    </p>
+                    <Button
+                      type="button"
+                      variant="default"
+                      disabled={!imagePrefillDecision.allowed}
+                      onClick={handleUseDetectedStress}
+                    >
+                      Use as max stress
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
             </div>
           </Section>
 
@@ -968,17 +1220,19 @@ export default function MaterialForm({
               <label className="flex items-start gap-3 rounded-2xl border border-[#e2e8f0] bg-[#f8fafc] px-4 py-3">
                 <input
                   type="checkbox"
-                  checked={compareWithAI}
-                  onChange={(event) => onCompareWithAIChange(event.target.checked)}
+                  checked={includeAIInterpretation}
+                  onChange={(event) =>
+                    onIncludeAIInterpretationChange(event.target.checked)
+                  }
                   className="mt-1 h-4 w-4 rounded border-[#94a3b8] text-[#0f766e] focus:ring-[#0f766e]"
                 />
                 <span>
                   <span className="block text-sm font-semibold text-[#0f172a]">
-                    Compare with AI
+                    AI interpretation
                   </span>
                   <span className="block text-sm text-[#475569]">
                     Run the native backend analysis first and optionally request a
-                    separate JSON comparison through the backend adapter.
+                    short textual interpretation of the result.
                   </span>
                 </span>
               </label>

@@ -1,8 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { analyzeFatigue, analyzeFatigueComparison } from "@/lib/api";
+import {
+  analyzeFatigue,
+  analyzeFatigueComparison,
+  analyzeFatigueInterpretation,
+  readStressFromImage,
+} from "@/lib/api";
 import type {
   FatigueAnalysisCompareRequest,
   FatigueAnalysisCompareResponse,
+  FatigueAnalysisInterpretRequest,
+  FatigueAnalysisInterpretResponse,
   FatigueAnalysisResponse,
   FatigueAnalysisRequest,
 } from "@/types/fatigue";
@@ -293,5 +300,187 @@ describe("analyzeFatigue", () => {
         body: JSON.stringify(request),
       })
     );
+  });
+
+  it("posts the interpretation request to the interpretation endpoint", async () => {
+    process.env.NEXT_PUBLIC_API_BASE_URL = "https://api.example.com/api/";
+
+    const request: FatigueAnalysisInterpretRequest = {
+      material: {
+        uts: 400,
+        yield_strength: 250,
+        endurance_limit: 200,
+        elastic_modulus: 210,
+      },
+      max_stress: 300,
+      min_stress: -100,
+      sn_curve_source: { mode: "material_basquin" },
+      surface_factor_selection: {
+        mode: "empirical_surface_finish",
+        finish_type: "machined",
+      },
+      marin_factors: {
+        size_factor: 1,
+        load_factor: 1,
+        temperature_factor: 1,
+        reliability_factor: 1,
+      },
+      selected_mean_stress_model: "goodman",
+      ai_interpretation: {
+        enabled: true,
+      },
+      vision_context: {
+        success: true,
+        detected_quantity: "von_mises",
+        detected_label: "Equivalent Stress",
+        detected_unit: "MPa",
+        max_value: 305,
+        min_value: 15,
+        confidence: "high",
+        notes: ["Legend visible"],
+        is_usable_for_prefill: true,
+      },
+    };
+
+    const response: FatigueAnalysisInterpretResponse = {
+      native_analysis: {
+        stress_state: {
+          input_max_stress: 300,
+          input_min_stress: -100,
+          corrected_max_stress: 300,
+          corrected_min_stress: -100,
+          stress_amplitude: 200,
+          mean_stress: 100,
+          stress_ratio: -0.3333333333,
+        },
+        modified_endurance_limit: 180,
+        sn_curve_source: {
+          mode: "material_basquin",
+          basquin_parameters: {
+            sigma_f_prime: 900,
+            b: -0.1,
+            source: "material_defaults",
+          },
+          basquin_fit: null,
+        },
+        cycles_to_failure: {
+          goodman: { status: "finite", cycles: 100000, reason: "finite" },
+          gerber: { status: "finite", cycles: 110000, reason: "finite" },
+          soderberg: { status: "finite", cycles: 90000, reason: "finite" },
+          morrow: { status: "finite", cycles: 105000, reason: "finite" },
+        },
+        mean_stress_corrections: [
+          {
+            model_name: "goodman",
+            effective_mean_stress: 100,
+            safety_factor: 1.1,
+            equivalent_alternating_stress: 180,
+            is_safe: true,
+            life: { status: "finite", cycles: 100000, reason: "finite" },
+          },
+        ],
+        selected_mean_stress_model: "goodman",
+        selected_mean_stress_result: {
+          model_name: "goodman",
+          effective_mean_stress: 100,
+          safety_factor: 1.1,
+          equivalent_alternating_stress: 180,
+          is_safe: true,
+          life: { status: "finite", cycles: 100000, reason: "finite" },
+        },
+        selected_life: { status: "finite", cycles: 100000, reason: "finite" },
+        sn_chart: {
+          curve: [],
+          endurance_limit: 180,
+          selected_point: null,
+        },
+        haigh_diagram: {
+          goodman_envelope: [],
+          gerber_envelope: [],
+          soderberg_envelope: [],
+          morrow_envelope: [],
+          operating_point: { mean_stress: 100, stress_amplitude: 200 },
+          corrected_operating_point: null,
+        },
+        notch_result: null,
+        miner_damage: null,
+      },
+      ai_interpretation: {
+        provider: "groq",
+        enabled: true,
+        status: "success",
+        result: {
+          summary: "Native result remains acceptable.",
+          key_findings: ["Mean stress model is the main driver."],
+          warnings: [],
+          engineering_notes: ["Verify image-derived stress before reuse."],
+          raw_model_name: "openai/gpt-oss-20b",
+        },
+        error: null,
+        metadata: {
+          response_format: "json_schema",
+          attempted_response_formats: ["json_schema"],
+          fallback_used: false,
+          problematic_fields: [],
+          validation_issue_count: 0,
+          validation_issues: [],
+        },
+      },
+    };
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(response), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await analyzeFatigueInterpretation(request);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.com/api/analyze/interpret",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify(request),
+      })
+    );
+  });
+
+  it("posts image uploads as multipart form data", async () => {
+    process.env.NEXT_PUBLIC_API_BASE_URL = "https://api.example.com/api/";
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          detected_quantity: "von_mises",
+          detected_label: "Equivalent Stress",
+          detected_unit: "MPa",
+          max_value: 312.6,
+          min_value: 12.1,
+          confidence: "high",
+          notes: ["Legend visible"],
+          is_usable_for_prefill: true,
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await readStressFromImage(new File(["image"], "stress.png", { type: "image/png" }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.com/api/vision/stress-from-image",
+      expect.objectContaining({
+        method: "POST",
+        body: expect.any(FormData),
+      })
+    );
+    const call = fetchMock.mock.calls[0];
+    expect(call[1].headers).toBeUndefined();
   });
 });

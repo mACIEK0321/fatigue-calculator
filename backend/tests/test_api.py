@@ -8,9 +8,14 @@ from app.models.schemas import (
     AIComparisonMetadata,
     AIComparisonResult,
     AIComparisonValidationIssue,
+    AIInterpretationMetadata,
+    AIInterpretationResult,
 )
 from app.routers import analysis
-from app.services.groq_client import GroqComparisonResponse
+from app.services.groq_client import (
+    GroqComparisonResponse,
+    GroqInterpretationResponse,
+)
 
 client = TestClient(app)
 
@@ -50,6 +55,25 @@ def compare_payload(enabled: bool = True) -> dict:
         "include_sn_curve_points": True,
         "include_goodman_or_haigh_points": True,
         "max_points_per_series": 25,
+    }
+    return payload
+
+
+def interpret_payload(enabled: bool = True) -> dict:
+    payload = valid_payload()
+    payload["ai_interpretation"] = {
+        "enabled": enabled,
+    }
+    payload["vision_context"] = {
+        "success": True,
+        "detected_quantity": "von_mises",
+        "detected_label": "Equivalent Stress",
+        "detected_unit": "MPa",
+        "max_value": 182.4,
+        "min_value": 12.0,
+        "confidence": "high",
+        "notes": ["Legend visible"],
+        "is_usable_for_prefill": True,
     }
     return payload
 
@@ -245,6 +269,159 @@ def test_compare_endpoint_preserves_native_analysis_when_ai_schema_validation_fa
     assert body["ai_comparison"]["metadata"]["problematic_fields"] == ["warnings"]
     assert body["ai_comparison"]["metadata"]["validation_issue_count"] == 1
     assert body["ai_comparison"]["metadata"]["validation_issues"][0]["field_path"] == "warnings"
+
+
+def test_interpret_endpoint_returns_native_and_ai_sections(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeGroqClient:
+        async def interpret_fatigue_analysis(self, interpretation_input: dict):
+            assert interpretation_input["vision_context"]["max_value"] == 182.4
+            return GroqInterpretationResponse(
+                result=AIInterpretationResult(
+                    summary="Finite-life result is governed mainly by mean-stress corrected amplitude.",
+                    key_findings=[
+                        "Selected Goodman result remains below the modified endurance limit.",
+                        "No loading blocks or notch correction materially degrade the case.",
+                    ],
+                    warnings=[],
+                    engineering_notes=[
+                        "Verify that the uploaded screenshot uses the same unit basis as the solver input."
+                    ],
+                    raw_model_name="openai/gpt-oss-20b",
+                ),
+                metadata=AIInterpretationMetadata(
+                    response_format="json_schema",
+                    attempted_response_formats=["json_schema"],
+                    fallback_used=False,
+                    problematic_fields=[],
+                    validation_issue_count=0,
+                    validation_issues=[],
+                ),
+            )
+
+    monkeypatch.setattr(analysis, "get_groq_client", lambda: FakeGroqClient())
+
+    response = client.post("/api/analyze/interpret", json=interpret_payload())
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["native_analysis"]["selected_life"]["status"] == "infinite"
+    assert body["ai_interpretation"]["status"] == "success"
+    assert body["ai_interpretation"]["result"]["summary"].startswith("Finite-life result")
+    assert body["ai_interpretation"]["metadata"]["response_format"] == "json_schema"
+
+
+def test_interpret_endpoint_preserves_native_analysis_when_ai_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeGroqClient:
+        async def interpret_fatigue_analysis(self, interpretation_input: dict):
+            raise analysis.GroqClientError(
+                code=analysis.AIComparisonErrorCode.timeout,
+                message="AI interpretation timed out before a valid response arrived.",
+                retriable=True,
+            )
+
+    monkeypatch.setattr(analysis, "get_groq_client", lambda: FakeGroqClient())
+
+    response = client.post("/api/analyze/interpret", json=interpret_payload())
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["native_analysis"]["selected_life"]["status"] == "infinite"
+    assert body["ai_interpretation"]["status"] == "error"
+    assert body["ai_interpretation"]["error"]["code"] == "timeout"
+    assert body["ai_interpretation"]["error"]["retriable"] is True
+
+
+def test_interpret_endpoint_marks_skipped_when_ai_disabled() -> None:
+    response = client.post("/api/analyze/interpret", json=interpret_payload(enabled=False))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["native_analysis"]["selected_life"]["status"] == "infinite"
+    assert body["ai_interpretation"]["status"] == "skipped"
+    assert body["ai_interpretation"]["error"]["code"] == "disabled"
+
+
+def test_vision_endpoint_returns_structured_reading(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeGroqClient:
+        async def extract_stress_from_image(
+            self,
+            *,
+            image_bytes: bytes,
+            content_type: str,
+            filename: str | None = None,
+        ):
+            assert image_bytes == b"fake-image-bytes"
+            assert content_type == "image/png"
+            assert filename == "stress.png"
+            return {
+                "success": True,
+                "detected_quantity": "von_mises",
+                "detected_label": "Equivalent Stress",
+                "detected_unit": "MPa",
+                "max_value": 312.6,
+                "min_value": 14.2,
+                "confidence": "high",
+                "notes": ["Legend visible"],
+                "is_usable_for_prefill": True,
+            }
+
+    monkeypatch.setattr(analysis, "get_groq_client", lambda: FakeGroqClient())
+
+    response = client.post(
+        "/api/vision/stress-from-image",
+        files={"file": ("stress.png", b"fake-image-bytes", "image/png")},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["detected_quantity"] == "von_mises"
+    assert body["max_value"] == 312.6
+    assert body["detected_unit"] == "MPa"
+
+
+def test_vision_endpoint_returns_unusable_low_confidence_reading(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeGroqClient:
+        async def extract_stress_from_image(
+            self,
+            *,
+            image_bytes: bytes,
+            content_type: str,
+            filename: str | None = None,
+        ):
+            return {
+                "success": False,
+                "detected_quantity": "unknown",
+                "detected_label": None,
+                "detected_unit": "unknown",
+                "max_value": None,
+                "min_value": None,
+                "confidence": "low",
+                "notes": ["Image too low resolution"],
+                "is_usable_for_prefill": False,
+            }
+
+    monkeypatch.setattr(analysis, "get_groq_client", lambda: FakeGroqClient())
+
+    response = client.post(
+        "/api/vision/stress-from-image",
+        files={"file": ("stress.png", b"fake-image-bytes", "image/png")},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is False
+    assert body["confidence"] == "low"
+    assert body["is_usable_for_prefill"] is False
+    assert "low resolution" in body["notes"][0]
 
 
 def test_analyze_endpoint_supports_notch_with_points_fit_and_loading_blocks() -> None:
