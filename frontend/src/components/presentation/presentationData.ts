@@ -69,7 +69,6 @@ export interface Slide {
   columns?: ComparisonColumn[];
   conclusions?: { heading: string; body: string }[];
   statusDone?: string[];
-  statusPending?: string[];
   note?: string;
 }
 
@@ -305,7 +304,7 @@ export const slides: Slide[] = [
     promptAnatomy: {
       kind: "analityczny",
       purpose: "Przeksztalcenie wymaganego zachowania systemu w plan techniczny — bez generowania kodu. Uzywany zanim powstal jakikolwiek plik.",
-      when: "Przed startem nowego modulu lub endpointu. ChatGPT tworzyl ten prompt na podstawie opisu funkcjonalnego.",
+      when: "Przed startem nowego modulu. ChatGPT tworzyl ten prompt na podstawie opisu funkcjonalnego.",
       sections: [
         {
           label: "Opis problemu",
@@ -324,26 +323,21 @@ export const slides: Slide[] = [
           value: "Schemat modulu: nazwy funkcji, typy parametrow i wyjsc",
         },
       ],
-      example: `# PROMPT ANALITYCZNY: planowanie fatigue_engine.py
+      example: `Jestem mechatronikiem i programista.
+Chce napisac aplikacje webowa do obliczen
+zmeczeniowych. Uzytkownik bedzie podawal
+naprezenia, parametry materialu i korekcje
+Marin, a aplikacja policzy graniczne Se,
+liczbe cykli N i wspolczynnik SF.
 
-Kontekst:
-Buduję moduł obliczeniowy do analizy zmęczeniowej.
-Backend: FastAPI + Python 3.11. Plik: fatigue_engine.py
+Backend: FastAPI + Python, plik fatigue_engine.py
+Frontend: Next.js + TypeScript
 
-Wymagane zachowanie:
-- Korekcje Marin: ka, kb, kc, kd, ke, kf → Se
-- Modele naprężenia średniego: Goodman, Gerber, Soderberg
-- Dopasowanie S-N (Basquin): b, sigma_f_prime → N(sigma_a)
-- Współczynnik bezpieczeństwa SF względem S_e i sigma_a
-
-Ograniczenia:
-- Zwróć wyłącznie sygnatury funkcji z typami
-- Bez implementacji, bez importów, bez docstringów
-- Każda funkcja osobno, bez klas
-
-Oczekiwany format:
-def calculate_modified_endurance_limit(...) -> float: ...
-def apply_goodman(...) -> float: ...`,
+Zaplanuj mi strukture fatigue_engine.py —
+same sygnatury funkcji z typami, bez kodu.
+Potrzebuje: korekcje Marin, modele Goodman/
+Gerber/Soderberg, dopasowanie S-N Basquina,
+obliczenie N i SF.`,
     },
   },
 
@@ -376,30 +370,24 @@ def apply_goodman(...) -> float: ...`,
           value: "Nie dotykaj innych funkcji w pliku — tylko ta jedna",
         },
       ],
-      example: `# PROMPT WYKONAWCZY: implementacja funkcji Marin
+      example: `Plik: backend/app/core/fatigue_engine.py
 
-Plik: backend/app/core/fatigue_engine.py
-
-Zaimplementuj funkcję:
+Zaimplementuj funkcje:
   calculate_modified_endurance_limit(
     Se_prime: float,
     ka: float, kb: float, kc: float,
     kd: float, ke: float, kf: float
   ) -> float
 
-Opis parametrów:
-  Se_prime  — przybliżona granica zmęczeniowa [MPa]
-  ka...kf   — czynniki korekcyjne Marin, zakres (0, 1]
+Se_prime — przyblizana granica [MPa]
+ka...kf  — czynniki Marin, zakres (0, 1]
 
 Logika:
   Se = ka * kb * kc * kd * ke * kf * Se_prime
-  Jeśli Se <= 0: rzuć ValueError("Se must be positive")
-  Zwróć Se zaokrąglone do 4 miejsc po przecinku
+  Jesli Se <= 0: ValueError("Se must be positive")
 
-Ograniczenia:
-  Bez dodatkowych importów
-  Bez komentarzy inline
-  Nie modyfikuj innych funkcji w pliku`,
+Bez importow, bez komentarzy.
+Nie modyfikuj innych funkcji w pliku.`,
     },
   },
 
@@ -417,7 +405,7 @@ Ograniczenia:
       sections: [
         {
           label: "Objaw bledu",
-          value: "Dokładny komunikat, endpoint, traceback — co sie dzeje",
+          value: "Dokladny komunikat, endpoint, traceback — co sie dzieje",
         },
         {
           label: "Kontekst lokalizacji",
@@ -432,114 +420,133 @@ Ograniczenia:
           value: "Nie zmieniaj sygnatury — istniejace testy musza przejsc",
         },
       ],
-      example: `# PROMPT NAPRAWCZY: blad walidacji Pydantic
+      example: `POST /api/analyze/compare zwraca 422.
+Traceback: pydantic.ValidationError
+  value is not a valid float
+  pole: sigma_max
 
-Objaw:
-POST /api/analyze/compare zwraca 422 Unprocessable Entity
-Traceback: pydantic.ValidationError — value is not a valid float
-Pole: sigma_max w odpowiedzi Groq API
+Groq zwraca {"sigma_max": "320 MPa"}
+zamiast {"sigma_max": 320.0}
 
-Przyczyna:
-Groq zwraca {"sigma_max": "320 MPa"} zamiast {"sigma_max": 320.0}
-JSON Schema response mode nie wymusił typu float
+Plik: backend/app/services/groq_client.py
+Funkcja: parse_groq_response(raw: dict)
 
-Lokalizacja:
-  plik:    backend/app/services/groq_client.py
-  funkcja: parse_groq_response(raw: dict) -> FatigueResult
+Dodaj parsowanie string -> float dla pol:
+sigma_max, sigma_min, safety_factor,
+cycles_to_failure.
+Formaty: "320 MPa", "320.0", "3.2e4".
 
-Zadanie:
-Dodaj parsowanie string → float dla pól:
-  sigma_max, sigma_min, safety_factor, cycles_to_failure
-Obsłuż formaty wejściowe: "320 MPa", "320.0", "3.2e4"
-Użyj re.sub do usunięcia jednostek przed float()
-
-Ograniczenia:
-  Nie zmieniaj sygnatury parse_groq_response
-  Testy test_groq_client.py muszą przejść bez zmian`,
+Nie zmieniaj sygnatury funkcji.
+Testy test_groq_client.py musza przejsc.`,
     },
   },
 
-  // ─── 12. PRZYKLAD: PROMPT PLANUJACY ─────────────────────────────────────
+  // ─── 12. PRAWDZIWY PROMPT DO MODELU - ANALIZA ────────────────────────────
   {
     id: 12,
     type: "prompt",
     badge: "Prompty",
-    title: "Przyklad: prompt planujacy",
-    subtitle: "Tworzony przez ChatGPT przed generowaniem kodu",
+    title: "Prompt wysylany do modelu — interpretacja wynikow",
+    subtitle: "Rzeczywisty system prompt + user prompt z groq_interpretation.py",
     prompt: {
-      label: "PROMPT ANALITYCZNY / PLANUJACY",
+      label: "SYSTEM PROMPT — /analyze/interpret",
       variant: "neutral",
-      code: `Kontekst:
-Buduje aplikacje do analizy zmeczeniowej.
-Backend: FastAPI + Python. Frontend: Next.js.
-Silnik musi implementowac:
-  - korekcje Marin (ka, kb, kc, kd, ke, kf)
-  - zmodyfikowana granice zmeczeniowa Se
-  - modele naprezenia sredniego: Goodman, Gerber, Soderberg
-  - dopasowanie S-N metoda Basquina
-  - obliczenie N i wspolczynnika bezpieczenstwa SF
+      code: `// SYSTEM PROMPT (build_interpretation_system_prompt)
+You are an engineering assistant interpreting
+a native fatigue-analysis result.
+The native solver is the source of truth.
+Do not recompute the physics.
+Do not invent missing values.
+Return exactly one valid JSON object.
+Do not add markdown, code fences or any text
+before or after the JSON.
+Use only the allowed keys.
 
-Zadanie:
-Zaplanuj strukture modulu fatigue_engine.py.
-Zdefiniuj sygnatury funkcji, typy parametrow i wyjsc.
-Zwroc wylacznie schemat - bez implementacji.`,
+// USER PROMPT (build_interpretation_user_prompt)
+Interpret the backend result in concise
+engineering language.
+Prefer short, specific points over generic advice.
+Mention whether the result appears safe or unsafe.
+Call out drivers such as mean stress correction,
+Marin factors, notch correction when relevant.
+Required keys: summary, key_findings, warnings,
+               engineering_notes, raw_model_name.
+Return arrays as [] when nothing useful to say.
+Set "raw_model_name" to "{model}" exactly.
+Input:{...payload z wynikami silnika...}`,
     },
   },
 
-  // ─── 13. PRZYKLAD: PROMPT WYKONAWCZY ────────────────────────────────────
+  // ─── 13. PRAWDZIWY PROMPT DO MODELU - VISION ─────────────────────────────
   {
     id: 13,
     type: "prompt",
     badge: "Prompty",
-    title: "Przyklad: prompt implementacyjny",
-    subtitle: "Do Claude Code - precyzyjne zadanie kodowe",
+    title: "Prompt wysylany do modelu — odczyt naprezen z MES",
+    subtitle: "Rzeczywisty system prompt + user prompt z groq_vision.py",
     prompt: {
-      label: "PROMPT WYKONAWCZY",
+      label: "SYSTEM PROMPT — /vision/stress-from-image",
       variant: "neutral",
-      code: `Plik: backend/app/core/fatigue_engine.py
+      code: `// SYSTEM PROMPT (build_vision_system_prompt)
+You read finite element analysis screenshots.
+Return exactly one valid JSON object.
+Do not add markdown, code fences or any text
+before or after the JSON.
+Use only the allowed keys.
+Do not guess aggressively.
+If the image is blurry or ambiguous, lower
+confidence and mark result unusable for prefill.
+Prefer von Mises or equivalent stress when visible.
 
-Zaimplementuj funkcje:
-  calculate_modified_endurance_limit(
-    Se_prime, ka, kb, kc, kd, ke, kf
-  )
-
-Parametry:
-  Se_prime: float - przyblizana granica zmeczeniowa [MPa]
-  ka...kf:  float - czynniki korekcyjne Marin, zakres (0, 1]
-
-Wymagania:
-  Se = ka * kb * kc * kd * ke * kf * Se_prime
-  Jesli Se <= 0, rzuc ValueError z komunikatem
-  Bez dodatkowych importow, bez komentarzy
-  Nie modyfikuj innych funkcji w pliku`,
+// USER PROMPT (build_vision_user_text)
+Analyze this screenshot from MESA, Ansys,
+Abaqus or another FEA tool.
+Return detected_quantity: von_mises /
+  equivalent_stress / unknown.
+Return max_value only when readable from legend,
+color bar, table or annotation.
+Set success=false and is_usable_for_prefill=false
+when max stress cannot be read reliably.
+Keep notes short: "Legend visible",
+  "Unit not clearly readable" etc.`,
     },
   },
 
-  // ─── 14. PRZYKLAD: PROMPT NAPRAWCZY ─────────────────────────────────────
+  // ─── 14. JSON SCHEMA DO MODELU ────────────────────────────────────────────
   {
     id: 14,
     type: "prompt",
     badge: "Prompty",
-    title: "Przyklad: prompt naprawczy",
-    subtitle: "Precyzyjny opis bledu - precyzyjna poprawka",
+    title: "JSON Schema wymuszajacy typ odpowiedzi",
+    subtitle: "Rzeczywisty schemat z groq_prompt.py — response_format: json_schema",
     prompt: {
-      label: "PROMPT BUGFIX",
-      variant: "warning",
-      code: `Problem:
-POST /api/analyze/compare - Groq API zwraca naprezenie
-jako string ("320 MPa") zamiast float (320.0).
-Blad Pydantic: "value is not a valid float"
+      label: "GROQ_INTERPRETATION_JSON_SCHEMA",
+      variant: "neutral",
+      code: `{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "summary",
+    "key_findings",
+    "warnings",
+    "engineering_notes",
+    "raw_model_name"
+  ],
+  "properties": {
+    "summary":           { "type": "string" },
+    "key_findings":      { "type": "array",
+                           "items": { "type": "string" } },
+    "warnings":          { "type": "array",
+                           "items": { "type": "string" } },
+    "engineering_notes": { "type": "array",
+                           "items": { "type": "string" } },
+    "raw_model_name":    { "type": "string" }
+  }
+}
 
-Kontekst:
-  plik:    backend/app/services/groq_client.py
-  funkcja: parse_groq_response()
-  pole:    "sigma_max": "320 MPa"
-
-Zadanie:
-Dodaj parsowanie string -> float w parse_groq_response()
-dla pol: sigma_max, sigma_min, safety_factor, cycles_to_failure.
-Obsluz formaty: "320 MPa", "320.0", "3.2e4".
-Nie zmieniaj sygnatury funkcji.`,
+// Jesli model zwroci liczbe jako string ("320 MPa")
+// lub doda dodatkowe pole — Groq odrzuci odpowiedz.
+// Fallback: json_object mode + reczne parsowanie.`,
     },
   },
 
@@ -572,7 +579,7 @@ Nie zmieniaj sygnatury funkcji.`,
       {
         text: "Kontrola kontekstu",
         sub: [
-          "Zbyt duzy kontekst - model modyfikował nie te pliki",
+          "Zbyt duzy kontekst - model modyfikowal nie te pliki",
           "Rozwiazanie: jeden plik / jedna funkcja na prompt",
         ],
       },
@@ -585,19 +592,16 @@ Nie zmieniaj sygnatury funkcji.`,
     type: "status",
     badge: "Stan",
     title: "Stan aplikacji",
-    subtitle: "Gotowe komponenty i pokrycie testami",
+    subtitle: "Zrealizowane komponenty i pokrycie testami",
     statusDone: [
-      "Silnik obliczen - Marin, Goodman / Gerber / Soderberg / Morrow, Basquin, Miner",
-      "API REST - /analyze, /analyze/compare, /analyze/interpret",
-      "Vision endpoint - odczyt naprezen ze screenshotow MES",
-      "Wykresy - krzywa S-N z punktem roboczym, diagram Goodmana",
-      "Baza materialow - AISI 1020, AISI 4340, Al 7075-T6, Ti-6Al-4V",
-      "Interpretacja AI - Groq /interpret, tekstowe podsumowanie wynikow",
-      "Testy - pytest 1 523 linii (backend), Vitest 9 plikow (frontend)",
-    ],
-    statusPending: [
-      "Pelna integracja AI comparison w UI",
-      "Tryb Miner - akumulacja uszkodzen dla wielu blokow obciazen",
+      "Silnik obliczen — Marin, Goodman / Gerber / Soderberg / Morrow, Basquin, Miner",
+      "5 endpointow REST — /analyze, /analyze/compare, /analyze/interpret, /vision, /surface-factor",
+      "Vision endpoint — odczyt naprezen ze screenshotow MES (Groq multimodal)",
+      "Wykresy — krzywa S-N z punktem roboczym, diagram Goodmana / Haigha",
+      "Baza materialow — AISI 1020, AISI 4340, Al 7075-T6, Ti-6Al-4V",
+      "Interpretacja AI — tekstowe podsumowanie wynikow przez LLM",
+      "JSON Schema response mode + fallback — kontrola formatu odpowiedzi AI",
+      "Testy — pytest 1 523 linii (backend), Vitest 9 plikow (frontend)",
     ],
   },
 

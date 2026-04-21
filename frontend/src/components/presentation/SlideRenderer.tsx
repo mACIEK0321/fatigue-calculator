@@ -366,35 +366,21 @@ function StatusSlide({ slide }: { slide: Slide }) {
   return (
     <div className="flex h-full flex-col gap-5">
       <SlideHeader slide={slide} />
-      <div className="grid flex-1 grid-cols-1 gap-4 overflow-y-auto sm:grid-cols-2">
-        <div className="flex flex-col gap-3 rounded-xl border border-[#bbf7d0] bg-[#f0fdf4] p-5">
-          <div className="flex items-center gap-2">
-            <span className="h-2.5 w-2.5 rounded-full bg-[#16a34a]" />
-            <p className="text-xs font-bold uppercase tracking-widest text-[#16a34a]">Gotowe</p>
-          </div>
-          <ul className="flex flex-col gap-2">
-            {slide.statusDone?.map((item, i) => (
-              <li key={i} className="flex items-start gap-2">
-                <span className="mt-0.5 shrink-0 text-sm font-bold text-[#16a34a]">&#10003;</span>
-                <span className="text-sm leading-5 text-[#1e293b]">{item}</span>
-              </li>
-            ))}
-          </ul>
+      <div className="flex-1 overflow-y-auto rounded-xl border border-[#bbf7d0] bg-[#f0fdf4] p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <span className="h-3 w-3 rounded-full bg-[#16a34a]" />
+          <p className="text-xs font-black uppercase tracking-widest text-[#16a34a]">
+            Zrealizowane
+          </p>
         </div>
-        <div className="flex flex-col gap-3 rounded-xl border border-[#fed7aa] bg-[#fff7ed] p-5">
-          <div className="flex items-center gap-2">
-            <span className="h-2.5 w-2.5 rounded-full bg-[#ea580c]" />
-            <p className="text-xs font-bold uppercase tracking-widest text-[#ea580c]">W toku / MVP</p>
-          </div>
-          <ul className="flex flex-col gap-2">
-            {slide.statusPending?.map((item, i) => (
-              <li key={i} className="flex items-start gap-2">
-                <span className="mt-0.5 shrink-0 text-sm text-[#ea580c]">&#8594;</span>
-                <span className="text-sm leading-5 text-[#1e293b]">{item}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
+        <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {slide.statusDone?.map((item, i) => (
+            <li key={i} className="flex items-start gap-2">
+              <span className="mt-0.5 shrink-0 text-sm font-bold text-[#16a34a]">&#10003;</span>
+              <span className="text-sm leading-5 text-[#1e293b]">{item}</span>
+            </li>
+          ))}
+        </ul>
       </div>
     </div>
   );
