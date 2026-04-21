@@ -457,6 +457,10 @@ class SNChartPoint(BaseModel):
 
 class SNChartData(BaseModel):
     curve: list[SNDataPoint] = Field(..., description="S-N curve data points")
+    basquin_curve: list[SNDataPoint] = Field(
+        default_factory=list,
+        description="Underlying Basquin curve before applying the endurance-limit plateau",
+    )
     endurance_limit: float = Field(..., description="Modified endurance limit Se in MPa")
     selected_point: Optional[SNChartPoint] = Field(
         None,

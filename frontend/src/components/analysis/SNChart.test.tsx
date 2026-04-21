@@ -37,7 +37,13 @@ describe("SNChart", () => {
     const chartData: SNChartData = {
       curve: [
         { cycles: 1e4, stress: 420 },
+        { cycles: 1e5, stress: 320 },
         { cycles: 1e6, stress: 245 },
+      ],
+      basquin_curve: [
+        { cycles: 1e4, stress: 420 },
+        { cycles: 1e5, stress: 320 },
+        { cycles: 1e6, stress: 210 },
       ],
       endurance_limit: 240,
       selected_point: null,
@@ -63,6 +69,7 @@ describe("SNChart", () => {
     );
 
     expect(markup).toContain("Active S-N curve");
+    expect(markup).toContain("Basquin fit");
     expect(markup).toContain("S-N points");
     expect(markup).toContain("Endurance limit Se");
   });

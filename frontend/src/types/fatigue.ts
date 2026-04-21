@@ -211,6 +211,7 @@ export interface SNChartPoint {
 
 export interface SNChartData {
   curve: SNDataPoint[];
+  basquin_curve?: SNDataPoint[];
   endurance_limit: number;
   selected_point?: SNChartPoint | null;
 }

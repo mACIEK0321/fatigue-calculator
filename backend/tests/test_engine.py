@@ -10,6 +10,7 @@ from app.core.fatigue_engine import (
     calculate_modified_endurance_limit,
     calculate_notch_sensitivity,
     calculate_surface_factor,
+    generate_endurance_limited_sn_curve,
     fit_basquin_from_points,
     generate_goodman_envelope,
     generate_gerber_envelope,
@@ -82,10 +83,27 @@ def test_goodman_ignores_compressive_mean_stress() -> None:
     assert negative_mean.safety_factor == pytest.approx(zero_mean.safety_factor)
 
 
-def test_generate_sn_curve_can_include_endurance_plateau() -> None:
-    points = generate_sn_curve(sigma_f_prime=1000.0, b=-0.1, se=250.0, num_points=40)
+def test_generate_sn_curve_returns_the_raw_basquin_response() -> None:
+    points = generate_sn_curve(sigma_f_prime=1000.0, b=-0.1, num_points=40)
     assert len(points) == 40
-    assert points[-1].stress >= 250.0
+    assert points[0].stress > points[-1].stress
+
+
+def test_generate_endurance_limited_sn_curve_inserts_a_tail_at_the_transition() -> None:
+    points = generate_endurance_limited_sn_curve(
+        sigma_f_prime=1000.0, b=-0.1, se=250.0, num_points=40
+    )
+
+    transition_index = next(
+        index for index, point in enumerate(points) if abs(point.stress - 250.0) < 1e-9
+    )
+    transition_cycles = basquin_cycles_to_failure(250.0, 1000.0, -0.1)
+
+    assert transition_index > 0
+    assert points[transition_index - 1].stress > 250.0
+    assert transition_cycles is not None
+    assert points[transition_index].cycles == pytest.approx(transition_cycles)
+    assert all(abs(point.stress - 250.0) < 1e-9 for point in points[transition_index:])
 
 
 def test_envelopes_use_expected_limits() -> None:
@@ -134,6 +152,15 @@ def test_points_fit_mode_is_explicit() -> None:
     )
     assert result["sn_chart"]["curve"][0]["cycles"] == pytest.approx(1.0)
     assert result["sn_chart"]["curve"][-1]["cycles"] == pytest.approx(1e9)
+    assert result["sn_chart"]["basquin_curve"][0]["cycles"] == pytest.approx(1.0)
+    assert result["sn_chart"]["basquin_curve"][-1]["cycles"] == pytest.approx(1e9)
+    assert (
+        result["sn_chart"]["basquin_curve"][-1]["stress"]
+        < result["modified_endurance_limit"]
+    )
+    assert result["sn_chart"]["curve"][-1]["stress"] == pytest.approx(
+        result["modified_endurance_limit"]
+    )
 
 
 def test_infinite_life_is_returned_semantically_when_sa_below_se() -> None:

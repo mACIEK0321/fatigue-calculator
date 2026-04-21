@@ -629,20 +629,74 @@ def palmgren_miner_damage(
 def generate_sn_curve(
     sigma_f_prime: float,
     b: float,
+    num_points: int = 100,
+    n_min: float = _DISPLAY_MIN_CYCLES,
+    n_max: float = _DISPLAY_MAX_CYCLES,
+) -> list[SNDataPoint]:
+    """Generate the raw Basquin S-N curve without endurance clipping."""
+    cycles_array = np.logspace(np.log10(n_min), np.log10(n_max), num_points)
+    points: list[SNDataPoint] = []
+    for cycles in cycles_array:
+        stress = basquin_stress_amplitude(float(cycles), sigma_f_prime, b)
+        if np.isfinite(stress) and stress > 0.0:
+            points.append(SNDataPoint(cycles=float(cycles), stress=float(stress)))
+    return points
+
+
+def generate_endurance_limited_sn_curve(
+    sigma_f_prime: float,
+    b: float,
     se: float = 0.0,
     num_points: int = 100,
     n_min: float = _DISPLAY_MIN_CYCLES,
     n_max: float = _DISPLAY_MAX_CYCLES,
 ) -> list[SNDataPoint]:
-    """Generate S-N curve data with an endurance-limit plateau."""
-    cycles_array = np.logspace(np.log10(n_min), np.log10(n_max), num_points)
-    points: list[SNDataPoint] = []
-    for cycles in cycles_array:
-        stress = basquin_stress_amplitude(float(cycles), sigma_f_prime, b)
-        plotted_stress = max(stress, se)
-        if np.isfinite(plotted_stress) and plotted_stress > 0.0:
-            points.append(SNDataPoint(cycles=float(cycles), stress=float(plotted_stress)))
-    return points
+    """Generate the active S-N response with an exact endurance-limit tail."""
+    basquin_curve = generate_sn_curve(
+        sigma_f_prime=sigma_f_prime,
+        b=b,
+        num_points=num_points,
+        n_min=n_min,
+        n_max=n_max,
+    )
+    if se <= 0.0 or not basquin_curve:
+        return basquin_curve
+
+    transition_cycles = basquin_cycles_to_failure(se, sigma_f_prime, b)
+    if transition_cycles is None or not np.isfinite(transition_cycles):
+        return basquin_curve
+
+    if transition_cycles <= n_min:
+        return [
+            SNDataPoint(cycles=point.cycles, stress=float(se)) for point in basquin_curve
+        ]
+
+    if transition_cycles >= n_max:
+        return basquin_curve
+
+    limited_curve: list[SNDataPoint] = []
+    transition_inserted = False
+
+    for point in basquin_curve:
+        if point.cycles < transition_cycles:
+            limited_curve.append(point)
+            continue
+
+        if not transition_inserted:
+            if not np.isclose(point.cycles, transition_cycles, rtol=1e-9, atol=0.0):
+                limited_curve.append(
+                    SNDataPoint(cycles=float(transition_cycles), stress=float(se))
+                )
+            transition_inserted = True
+
+        limited_curve.append(SNDataPoint(cycles=point.cycles, stress=float(se)))
+
+    if not transition_inserted:
+        limited_curve.append(SNDataPoint(cycles=float(transition_cycles), stress=float(se)))
+        if not np.isclose(transition_cycles, n_max, rtol=1e-9, atol=0.0):
+            limited_curve.append(SNDataPoint(cycles=float(n_max), stress=float(se)))
+
+    return limited_curve
 
 
 def generate_goodman_envelope(
@@ -842,7 +896,12 @@ def run_full_analysis(
         raise ValueError("Unknown selected_mean_stress_model")
     selected_result = correction_by_model[selected_model_key]
 
-    sn_curve = generate_sn_curve(
+    basquin_curve = generate_sn_curve(
+        sigma_f_prime=sigma_f_prime,
+        b=b_exponent,
+        num_points=num_points,
+    )
+    sn_curve = generate_endurance_limited_sn_curve(
         sigma_f_prime=sigma_f_prime,
         b=b_exponent,
         se=se,
@@ -920,6 +979,9 @@ def run_full_analysis(
         "selected_life": _life_to_dict(selected_result.life),
         "sn_chart": {
             "curve": [{"cycles": point.cycles, "stress": point.stress} for point in sn_curve],
+            "basquin_curve": [
+                {"cycles": point.cycles, "stress": point.stress} for point in basquin_curve
+            ],
             "endurance_limit": float(se),
             "selected_point": selected_chart_point,
         },
